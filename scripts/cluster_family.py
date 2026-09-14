@@ -16,6 +16,10 @@ constructs_path = f"{project_dir}/results/constructs.csv"
 output_dir = f"{project_dir}/results"
 min_wt_seqs = 5
 focus_family = "PF00018"
+# the two studies sample different parts of protein space (lehner is human, rocklin is
+# across nature), so cluster each on its own as well as pooled. pooled is what the
+# split protocol needs, because only pooled clustering catches cross-study leakage.
+scopes = ['pooled', 'lehner', 'rocklin']
 identity_mode = "shortest"
 linkage_method = "average"
 thresholds = [0.90, 0.80, 0.70, 0.60, 0.50, 0.40, 0.30]
@@ -53,68 +57,88 @@ domains = (annotated.groupby(['pfam_acc', 'wt_sequence'])
            .reset_index())
 domains['wt_length'] = domains['wt_sequence'].str.len()
 
-family_sizes = domains.groupby('pfam_acc').size()
-families = sorted(family_sizes[family_sizes >= min_wt_seqs].index)
-print(f"clustering {len(families)} families with at least {min_wt_seqs} distinct wild-type domains")
 print(f"identity mode = {identity_mode}, linkage = {linkage_method}")
 
 rows = []
 assignments = []
-for family in families:
-    members = domains[domains['pfam_acc'] == family].reset_index(drop = True)
-    identity, n_columns = identity_matrix(members['wt_sequence'].tolist())
-    off_diagonal = identity[np.triu_indices(len(members), 1)]
+for scope in scopes:
+    if scope == 'pooled':
+        pool = domains
+    else:
+        pool = domains[domains['papers'].str.contains(scope)]
+    family_sizes = pool.groupby('pfam_acc').size()
+    families = sorted(family_sizes[family_sizes >= min_wt_seqs].index)
+    print(f"  {scope}: {len(families)} families with at least {min_wt_seqs} domains")
 
-    member_clusters = members[['pfam_acc', 'wt_sequence', 'label', 'papers',
-                               'n_variants', 'wt_length']].copy()
-    for threshold in thresholds:
-        labels = cluster_at(identity, threshold)
-        sizes = pd.Series(labels).value_counts()
-        variants = members.groupby(labels)['n_variants'].sum()
-        member_clusters[f"cluster_{int(threshold * 100)}"] = labels
-        rows.append({
-            'pfam_acc': family,
-            'n_domains': len(members),
-            'msa_columns': n_columns,
-            'median_identity': round(float(np.median(off_diagonal)), 3),
-            'max_identity': round(float(off_diagonal.max()), 3),
-            'threshold': threshold,
-            'n_clusters': int(sizes.size),
-            'n_singletons': int((sizes == 1).sum()),
-            'largest_cluster': int(sizes.max()),
-            'pct_in_largest': round(100 * sizes.max() / len(members), 1),
-            'pct_variants_in_largest': round(100 * variants.max() / members['n_variants'].sum(), 1),
-        })
-    assignments.append(member_clusters)
+    for family in families:
+        members = pool[pool['pfam_acc'] == family].reset_index(drop = True)
+        identity, n_columns = identity_matrix(members['wt_sequence'].tolist())
+        off_diagonal = identity[np.triu_indices(len(members), 1)]
 
-    if family == focus_family:
-        order = leaves_list(linkage(squareform(1 - identity, checks = False), method = linkage_method))
-        fig, ax = plt.subplots(figsize = (7, 6))
-        sns.heatmap(identity[np.ix_(order, order)], cmap = "viridis", vmin = 0, vmax = 1, square = True,
-                    xticklabels = False, yticklabels = False,
-                    cbar_kws = {"label": "sequence identity"}, ax = ax)
-        ax.set_title(f"Pairwise identity: {family}\n"
-                     f"{len(members)} distinct wild-type domains, identity mode = {identity_mode}",
-                     fontsize = 10)
-        plt.tight_layout()
-        heatmap_path = f"{output_dir}/identity_{family}.png"
-        plt.savefig(heatmap_path, dpi = 150)
-        print(f"Identity heatmap saved to {heatmap_path}")
+        member_clusters = members[['pfam_acc', 'wt_sequence', 'label', 'papers',
+                                   'n_variants', 'wt_length']].copy()
+        member_clusters['scope'] = scope
+        for threshold in thresholds:
+            labels = cluster_at(identity, threshold)
+            sizes = pd.Series(labels).value_counts()
+            variants = members.groupby(labels)['n_variants'].sum()
+            member_clusters[f"cluster_{int(threshold * 100)}"] = labels
+            rows.append({
+                'scope': scope,
+                'pfam_acc': family,
+                'n_domains': len(members),
+                'msa_columns': n_columns,
+                'median_identity': round(float(np.median(off_diagonal)), 3),
+                'max_identity': round(float(off_diagonal.max()), 3),
+                'threshold': threshold,
+                'n_clusters': int(sizes.size),
+                'n_singletons': int((sizes == 1).sum()),
+                'largest_cluster': int(sizes.max()),
+                'pct_in_largest': round(100 * sizes.max() / len(members), 1),
+                'pct_variants_in_largest': round(100 * variants.max() / members['n_variants'].sum(), 1),
+            })
+        assignments.append(member_clusters)
+
+        if scope == 'pooled' and family == focus_family:
+            order = leaves_list(linkage(squareform(1 - identity, checks = False), method = linkage_method))
+            fig, ax = plt.subplots(figsize = (7, 6))
+            sns.heatmap(identity[np.ix_(order, order)], cmap = "viridis", vmin = 0, vmax = 1, square = True,
+                        xticklabels = False, yticklabels = False,
+                        cbar_kws = {"label": "sequence identity"}, ax = ax)
+            ax.set_title(f"Pairwise identity: {family}\n"
+                         f"{len(members)} distinct wild-type domains, identity mode = {identity_mode}",
+                         fontsize = 10)
+            plt.tight_layout()
+            heatmap_path = f"{output_dir}/identity_{family}.png"
+            plt.savefig(heatmap_path, dpi = 150)
+            print(f"Identity heatmap saved to {heatmap_path}")
 
 clusters = pd.concat(assignments, ignore_index = True)
 report = pd.DataFrame(rows)
 
 print()
-print("=" * 90)
-print(f"CLUSTERING OF {focus_family}")
-print("=" * 90)
+print("=" * 95)
+print(f"CLUSTERING OF {focus_family}, POOLED AND WITHIN EACH STUDY")
+print("=" * 95)
 print(report[report['pfam_acc'] == focus_family].to_string(index = False))
 
 print()
-print("=" * 90)
-print("ACROSS ALL FAMILIES: HOW BALANCED ARE THE CLUSTERS AT EACH THRESHOLD")
-print("=" * 90)
-balance = report.groupby('threshold').agg(
+print("=" * 95)
+print("USABLE FAMILIES BY SCOPE: AT LEAST 5 CLUSTERS AND NO CLUSTER OVER HALF THE DOMAINS")
+print("=" * 95)
+report['usable'] = (report['n_clusters'] >= 5) & (report['pct_in_largest'] <= 50)
+pivot = report.pivot_table(index = 'threshold', columns = 'scope', values = 'usable', aggfunc = 'sum')
+totals = report.groupby('scope')['pfam_acc'].nunique()
+print(pivot.to_string())
+print()
+print("families analysed per scope:")
+print(totals.to_string())
+
+print()
+print("=" * 95)
+print("POOLED: HOW BALANCED ARE THE CLUSTERS AT EACH THRESHOLD")
+print("=" * 95)
+balance = report[report['scope'] == 'pooled'].groupby('threshold').agg(
     families = ('pfam_acc', 'nunique'),
     median_clusters = ('n_clusters', 'median'),
     median_singleton_frac = ('n_singletons', 'median'),
@@ -126,10 +150,7 @@ print(balance.to_string())
 
 # a threshold is usable for splitting only if a family has enough clusters to hold
 # out whole clusters without one of them dominating the family
-usable = report[(report['n_clusters'] >= 5) & (report['pct_in_largest'] <= 50)]
-print()
-print("families with >=5 clusters and no cluster holding >50% of domains:")
-print(usable.groupby('threshold').size().to_string())
+
 
 report_path = f"{output_dir}/cluster_report.csv"
 report.to_csv(report_path, index = False)
