@@ -3,6 +3,16 @@
 # for pip and for caching the model; compute nodes may not.
 set -e
 
+# this script only makes sense on O2. if the ssh session dropped, the commands run
+# on the laptop instead and fail confusingly on a read-only /n, so check first.
+if [ ! -d /n/groups/marks ]; then
+  echo "ERROR: /n/groups/marks not found - you are not on O2."
+  echo "Your ssh session probably dropped. Reconnect with:"
+  echo "  ssh -o ServerAliveInterval=60 deb278@o2.hms.harvard.edu"
+  echo "then cd ~/supervised-protein-fitness and run this again."
+  exit 1
+fi
+
 SHARED=${SPF_OUTPUT:-/n/groups/marks/projects/ProteinGym_supervised/260918_domain_clustering}
 
 module load gcc/9.2.0 2>/dev/null || true
