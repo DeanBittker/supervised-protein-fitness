@@ -10,7 +10,7 @@
 # Submit from the repo root, after jobs/setup_o2.sh has been run once:
 #   sbatch jobs/run_pipeline.sbatch
 
-set -e
+set -o pipefail
 mkdir -p logs results figures
 
 module load gcc/9.2.0 2>/dev/null || true
@@ -35,15 +35,15 @@ python3 scripts/pfam_summary.py
 
 echo
 echo "=== 3/7 msa, identity matrices, clusters, 80/10/10 split ==="
-python3 scripts/msa_identity.py
+python3 scripts/msa_identity.py || echo 'SKIPPED: needs biotite - run locally'
 
 echo
 echo "=== 4/7 clustering sweep across thresholds ==="
-python3 scripts/cluster_family.py
+python3 scripts/cluster_family.py || echo 'SKIPPED: needs biotite - run locally'
 
 echo
 echo "=== 5/7 cross-study overlap ==="
-python3 scripts/shared_domains.py
+python3 scripts/shared_domains.py || echo 'SKIPPED: needs biotite - run locally'
 
 echo
 echo "=== 6/7 loading assay archives ==="

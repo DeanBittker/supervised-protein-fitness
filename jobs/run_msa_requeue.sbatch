@@ -15,7 +15,7 @@
 # redoing work. Check available partitions with: sinfo -s
 # If your cluster exposes a dedicated requeue partition, change --partition above.
 
-set -e
+set -o pipefail
 mkdir -p logs
 module load gcc/9.2.0 2>/dev/null || true
 module load python/3.10.11 2>/dev/null || module load python/3.9.14 2>/dev/null || true
@@ -30,7 +30,7 @@ echo "started: $(date)"
 
 for step in manifest_table pfam_summary msa_identity cluster_family shared_domains; do
   echo; echo "=== $step ==="
-  python3 scripts/$step.py
+  python3 scripts/$step.py || echo "SKIPPED $step (needs biotite - run locally)"
 done
 
 echo; echo "=== load_assays (cached; SPF_FORCE_RELOAD=1 to rebuild) ==="

@@ -19,24 +19,27 @@ module load gcc/9.2.0 2>/dev/null || true
 module load python/3.10.11 2>/dev/null || module load python/3.9.14 2>/dev/null || true
 echo "python: $(which python3)  $(python3 --version)"
 
-# biotite needs python 3.10+; on 3.9 pip falls back to a source build that fails
-# without development headers. if the module did not load, stop here.
 version=$(python3 -c 'import sys; print(sys.version_info[0] * 100 + sys.version_info[1])')
-if [ "$version" -lt 310 ]; then
-  echo
-  echo "ERROR: python $(python3 --version) is too old - biotite needs 3.10 or newer."
-  echo "See what is available and load one explicitly:"
-  echo "  module avail python"
-  echo "  module load python/3.10.11"
-  echo "then delete .venv and run this again."
-  exit 1
-fi
 
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --quiet --upgrade pip
-pip install --quiet numpy pandas scipy matplotlib seaborn biotite pyarrow
-echo "environment ready"
+# core set: everything the O2 side needs, all available as wheels
+pip install --quiet numpy pandas scipy matplotlib seaborn pyarrow
+echo "core environment ready"
+
+# biotite is only used by the sequence-level scripts (msa_identity, cluster_family,
+# shared_domains), which run in seconds on a laptop. it has no wheel for python 3.9
+# and building it needs development headers O2 does not provide, so it is optional
+# here rather than fatal.
+if [ "$version" -ge 310 ]; then
+  pip install --quiet biotite && echo "biotite installed - sequence scripts will run here too" \
+    || echo "biotite failed to install - run the sequence scripts locally instead"
+else
+  echo "python $(python3 --version) is below 3.10, so biotite is skipped."
+  echo "  run msa_identity.py, cluster_family.py and shared_domains.py locally;"
+  echo "  everything else, including the archive read, runs here."
+fi
 
 echo
 echo "shared output folder: $SHARED"
