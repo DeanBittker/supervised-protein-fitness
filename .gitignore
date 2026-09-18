@@ -20,3 +20,6 @@ venv/
 
 # SLURM logs
 logs/
+
+# Private project notes - not for a public repo
+claude_notes/
