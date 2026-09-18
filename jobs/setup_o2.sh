@@ -48,7 +48,10 @@ mkdir -p logs
 echo "created data/ results/ figures/ embeddings/"
 
 if [ ! -f "$SHARED/data/260822_manifests_R1_plus_R2.csv" ]; then
-  found=$(find /n/groups/marks/projects -maxdepth 4 -name '*260822_manifests*' 2>/dev/null | head -1)
+  # bounded: an unbounded find over a lab filesystem can run for many minutes
+  echo "looking for the manifest (up to 45s)..."
+  found=$(timeout 45 find /n/groups/marks/projects/ProteinGym2 /n/groups/marks/projects/ProteinGym_supervised \
+            -maxdepth 3 -name '*260822_manifests*' 2>/dev/null | head -1)
   if [ -n "$found" ]; then
     cp "$found" "$SHARED/data/260822_manifests_R1_plus_R2.csv"
     echo "manifest copied from $found"
