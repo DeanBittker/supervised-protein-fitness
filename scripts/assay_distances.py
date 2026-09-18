@@ -44,8 +44,17 @@ def scaled(values):
 
 
 variants = pd.read_parquet(variants_path)
-clusters = pd.read_csv(clusters_path)
-pooled_clusters = clusters[clusters['scope'] == 'pooled'] if 'scope' in clusters.columns else clusters
+
+# cluster assignments come from msa_identity.py, which needs biotite. without them
+# the distances are still computed; only the within-versus-between cluster test is
+# skipped, so this stays useful on a machine that cannot run the sequence steps.
+if os.path.exists(clusters_path):
+    clusters = pd.read_csv(clusters_path)
+    pooled_clusters = clusters[clusters['scope'] == 'pooled'] if 'scope' in clusters.columns else clusters
+else:
+    print(f"no cluster assignments at {clusters_path}")
+    print("  computing distances only; run msa_identity.py to enable the cluster test")
+    pooled_clusters = pd.DataFrame(columns = ['pfam_acc', 'label'])
 
 print(f"variants loaded: {len(variants):,}")
 print(f"scaling: {scaling}, cluster column: {cluster_column}")
