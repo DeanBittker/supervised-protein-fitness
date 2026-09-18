@@ -19,12 +19,28 @@ manifest_path = f"{data_root}/260822_manifests_R1_plus_R2.csv"
 output_dir = f"{output_root}/results"
 score_column = "DMS_score"
 sequence_column = "mutated_sequence"
+# the archives do not use one spelling: seen so far are "DMS Score" and "DMS_score",
+# "sequence" and "mutated_sequence". match on a normalised key instead of exact text.
+score_aliases = ["dmsscore", "score", "dms"]
+sequence_aliases = ["mutatedsequence", "sequence", "seq"]
 dois = ['10.1038/s41586-023-06328-6', '10.1038/s41586-024-08370-4']
 paper_names = {'10.1038/s41586-023-06328-6': 'rocklin', '10.1038/s41586-024-08370-4': 'lehner'}
 inspect_only = os.environ.get("SPF_INSPECT_ONLY", "") == "1"
 force_reload = os.environ.get("SPF_FORCE_RELOAD", "") == "1"
 
 os.makedirs(output_dir, exist_ok = True)
+
+
+def normalise(name):
+    return ''.join(c for c in str(name).lower() if c.isalnum())
+
+
+def resolve(columns, aliases):
+    lookup = {normalise(c): c for c in columns}
+    for alias in aliases:
+        if alias in lookup:
+            return lookup[alias]
+    return None
 
 
 def read_archive(path):
@@ -127,9 +143,12 @@ for i, stem in enumerate(matched):
     if assay is None:
         problems.append({'dataset': stem, 'issue': "no assays/*.csv inside"})
         continue
-    if score_column not in assay.columns or sequence_column not in assay.columns:
+    found_score = resolve(assay.columns, score_aliases)
+    found_sequence = resolve(assay.columns, sequence_aliases)
+    if found_score is None or found_sequence is None:
         problems.append({'dataset': stem, 'issue': f"columns {list(assay.columns)[:6]}"})
         continue
+    assay = assay.rename(columns = {found_score: score_column, found_sequence: sequence_column})
 
     # each archive also carries a fasta, a structure and two msas; record what is
     # present so the inventory is known without reopening a thousand zips later
@@ -163,6 +182,10 @@ variants['construct'] = lookup.loc[variants['dataset'], 'construct'].values
 variants['paper'] = lookup.loc[variants['dataset'], 'paper'].values
 variants['pfam_acc'] = lookup.loc[variants['dataset'], 'pfam accession'].values
 variants['mut_length'] = variants[sequence_column].astype(str).str.len()
+# insertions are written as lowercase residues and deletions as gap characters,
+# following the a3m convention, so both are flaggable straight off the sequence
+variants['has_insertion'] = variants[sequence_column].astype(str).str.contains('[a-z]', regex = True)
+variants['has_deletion'] = variants[sequence_column].astype(str).str.contains('-', regex = False)
 
 print()
 print("=" * 70)
@@ -175,6 +198,9 @@ print(f"null scores          {variants[score_column].isna().sum():>8,}")
 print()
 print("rows by paper:")
 print(variants.groupby('paper').size().to_string())
+print()
+print(f"rows with an insertion (lowercase residue): {variants['has_insertion'].sum():,}")
+print(f"rows with a deletion (gap character):       {variants['has_deletion'].sum():,}")
 
 loaded = variants.groupby('dataset').size().rename('loaded')
 check = lookup.loc[matched, ['n_variants']].join(loaded)
