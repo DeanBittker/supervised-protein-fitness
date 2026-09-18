@@ -12,11 +12,15 @@ from scipy.spatial.distance import squareform
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
-constructs_path = f"{project_dir}/results/constructs.csv"
-results_dir = f"{project_dir}/results"
+# outputs go to the repo by default; on O2 set SPF_OUTPUT to the shared project
+# folder so results are computed once and pulled down rather than recomputed
+output_root = os.environ.get("SPF_OUTPUT", project_dir)
+data_root = os.environ.get("SPF_DATA", f"{project_dir}/data")
+constructs_path = f"{output_root}/results/constructs.csv"
+results_dir = f"{output_root}/results"
 msa_dir = f"{results_dir}/msa"
 identity_dir = f"{results_dir}/identity"
-figure_dir = f"{project_dir}/figures/identity"
+figure_dir = f"{output_root}/figures/identity"
 min_wt_seqs = 5
 identity_mode = "shortest"
 linkage_method = "average"

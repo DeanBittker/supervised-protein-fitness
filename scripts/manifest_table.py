@@ -5,8 +5,12 @@ import pandas as pd
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
-manifest_path = f"{project_dir}/data/260822_manifests_R1_plus_R2.csv"
-output_dir = f"{project_dir}/results"
+# outputs go to the repo by default; on O2 set SPF_OUTPUT to the shared project
+# folder so results are computed once and pulled down rather than recomputed
+output_root = os.environ.get("SPF_OUTPUT", project_dir)
+data_root = os.environ.get("SPF_DATA", f"{project_dir}/data")
+manifest_path = f"{data_root}/260822_manifests_R1_plus_R2.csv"
+output_dir = f"{output_root}/results"
 dois = ['10.1038/s41586-023-06328-6', '10.1038/s41586-024-08370-4']
 paper_names = {'10.1038/s41586-023-06328-6': 'rocklin', '10.1038/s41586-024-08370-4': 'lehner'}
 

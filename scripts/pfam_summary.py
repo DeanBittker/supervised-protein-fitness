@@ -8,8 +8,12 @@ import seaborn as sns
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
-constructs_path = f"{project_dir}/results/constructs.csv"
-output_dir = f"{project_dir}/results"
+# outputs go to the repo by default; on O2 set SPF_OUTPUT to the shared project
+# folder so results are computed once and pulled down rather than recomputed
+output_root = os.environ.get("SPF_OUTPUT", project_dir)
+data_root = os.environ.get("SPF_DATA", f"{project_dir}/data")
+constructs_path = f"{output_root}/results/constructs.csv"
+output_dir = f"{output_root}/results"
 thresholds = [2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 26, 30]
 
 os.makedirs(output_dir, exist_ok = True)

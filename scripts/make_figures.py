@@ -7,8 +7,12 @@ import matplotlib.pyplot as plt
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
-results_dir = f"{project_dir}/results"
-output_dir = f"{project_dir}/figures"
+# outputs go to the repo by default; on O2 set SPF_OUTPUT to the shared project
+# folder so results are computed once and pulled down rather than recomputed
+output_root = os.environ.get("SPF_OUTPUT", project_dir)
+data_root = os.environ.get("SPF_DATA", f"{project_dir}/data")
+results_dir = f"{output_root}/results"
+output_dir = f"{output_root}/figures"
 min_wt_seqs = 5
 identity_low = 0.60
 identity_high = 0.70
@@ -48,7 +52,7 @@ def recede(ax):
     ax.set_axisbelow(True)
 
 
-constructs = pd.read_csv(results_dir + "/constructs.csv")
+constructs = pd.read_csv(f"{output_root}/results/constructs.csv")
 annotated = constructs.dropna(subset = ['pfam_acc'])
 
 # one row per distinct wild-type domain per study, so the two studies are never pooled

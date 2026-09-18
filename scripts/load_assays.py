@@ -9,14 +9,20 @@ import pandas as pd
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
-archive_dir = "/n/groups/marks/projects/ProteinGym2/supervised/260914_domainome_megascale"
-manifest_path = f"{project_dir}/data/260822_manifests_R1_plus_R2.csv"
-output_dir = f"{project_dir}/results"
+# outputs go to the repo by default; on O2 set SPF_OUTPUT to the shared project
+# folder so results are computed once and pulled down rather than recomputed
+output_root = os.environ.get("SPF_OUTPUT", project_dir)
+data_root = os.environ.get("SPF_DATA", f"{project_dir}/data")
+archive_dir = os.environ.get("SPF_ARCHIVES",
+    "/n/groups/marks/projects/ProteinGym2/supervised/260914_domainome_megascale")
+manifest_path = f"{data_root}/260822_manifests_R1_plus_R2.csv"
+output_dir = f"{output_root}/results"
 score_column = "DMS_score"
 sequence_column = "mutated_sequence"
 dois = ['10.1038/s41586-023-06328-6', '10.1038/s41586-024-08370-4']
 paper_names = {'10.1038/s41586-023-06328-6': 'rocklin', '10.1038/s41586-024-08370-4': 'lehner'}
-inspect_only = False
+inspect_only = os.environ.get("SPF_INSPECT_ONLY", "") == "1"
+force_reload = os.environ.get("SPF_FORCE_RELOAD", "") == "1"
 
 os.makedirs(output_dir, exist_ok = True)
 
@@ -43,6 +49,16 @@ rows['paper'] = rows['DOI'].map(paper_names)
 rows['construct'] = rows['filename'].astype(str).str.replace(r'_(substitutions|indels)$', '', regex = True)
 rows['n_variants'] = pd.to_numeric(rows['number of variants'], errors = 'coerce')
 lookup = rows.set_index('filename')
+
+# reading a thousand archives is the slow step, so it is cached: if the parquet is
+# already there this is a no-op unless SPF_FORCE_RELOAD=1
+cached = f"{output_dir}/variants.parquet"
+if os.path.exists(cached) and not force_reload:
+    existing = pd.read_parquet(cached)
+    print(f"cached variant table already present: {cached}")
+    print(f"  {len(existing):,} rows over {existing['dataset'].nunique():,} datasets")
+    print("  set SPF_FORCE_RELOAD=1 to rebuild it")
+    raise SystemExit(0)
 
 archives = sorted(glob.glob(f"{archive_dir}/*.pgarchive"))
 print(f"archive directory: {archive_dir}")

@@ -11,8 +11,12 @@ from scipy.spatial.distance import squareform
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
-results_dir = f"{project_dir}/results"
-figure_dir = f"{project_dir}/figures"
+# outputs go to the repo by default; on O2 set SPF_OUTPUT to the shared project
+# folder so results are computed once and pulled down rather than recomputed
+output_root = os.environ.get("SPF_OUTPUT", project_dir)
+data_root = os.environ.get("SPF_DATA", f"{project_dir}/data")
+results_dir = f"{output_root}/results"
+figure_dir = f"{output_root}/figures"
 variants_path = f"{results_dir}/variants.parquet"
 clusters_path = f"{results_dir}/domain_clusters.csv"
 score_column = "DMS_score"
