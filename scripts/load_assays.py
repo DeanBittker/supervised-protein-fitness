@@ -1,4 +1,5 @@
 import os
+import re
 import glob
 import zipfile
 import tarfile
@@ -9,10 +10,12 @@ import pandas as pd
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
 archive_dir = "/n/groups/marks/projects/ProteinGym2/supervised/260914_domainome_megascale"
-constructs_path = f"{project_dir}/results/constructs.csv"
+manifest_path = f"{project_dir}/data/260822_manifests_R1_plus_R2.csv"
 output_dir = f"{project_dir}/results"
 score_column = "DMS_score"
 sequence_column = "mutated_sequence"
+dois = ['10.1038/s41586-023-06328-6', '10.1038/s41586-024-08370-4']
+paper_names = {'10.1038/s41586-023-06328-6': 'rocklin', '10.1038/s41586-024-08370-4': 'lehner'}
 inspect_only = False
 
 os.makedirs(output_dir, exist_ok = True)
@@ -31,48 +34,47 @@ def inner_csvs(path):
     return [], {}
 
 
+# archive stems match the manifest filename column, suffixes included, so the join is
+# at the manifest-row level. the construct is that name with the rocklin
+# _substitutions / _indels suffix removed.
+manifest = pd.read_csv(manifest_path, low_memory = False)
+rows = manifest[manifest['DOI'].isin(dois)].copy()
+rows['paper'] = rows['DOI'].map(paper_names)
+rows['construct'] = rows['filename'].astype(str).str.replace(r'_(substitutions|indels)$', '', regex = True)
+rows['n_variants'] = pd.to_numeric(rows['number of variants'], errors = 'coerce')
+lookup = rows.set_index('filename')
+
 archives = sorted(glob.glob(f"{archive_dir}/*.pgarchive"))
-if not archives:
-    archives = sorted(glob.glob(f"{archive_dir}/*"))
 print(f"archive directory: {archive_dir}")
-print(f"files found: {len(archives)}")
+print(f"pgarchive files found: {len(archives)}")
 if not archives:
-    raise SystemExit("nothing found - check the path")
+    raise SystemExit("no .pgarchive files found - check the path")
 
-print()
-print("first five entries:")
-for path in archives[:5]:
-    print(f"  {os.path.basename(path)}")
-
-constructs = pd.read_csv(constructs_path)
-known = set(constructs['construct'])
+stems = {os.path.basename(p)[:-len('.pgarchive')]: p for p in archives}
+known = set(lookup.index)
 
 print()
 print("=" * 70)
-print("NAME MAPPING")
+print("NAME MAPPING (archive stem against manifest filename)")
 print("=" * 70)
-stems = {os.path.splitext(os.path.basename(p))[0]: p for p in archives}
-matched = {s: p for s, p in stems.items() if s in known}
-unmatched = sorted(s for s in stems if s not in known)
-print(f"archives                        {len(stems):>6,}")
-print(f"  stem matches a construct      {len(matched):>6,}")
-print(f"  stem does not match           {len(unmatched):>6,}")
-print(f"constructs with no archive      {len(known - set(stems)):>6,}")
-if unmatched:
-    print()
-    print("unmatched archive stems (first 10):")
-    for s in unmatched[:10]:
-        print(f"  {s}")
+matched = sorted(set(stems) & known)
+extra = sorted(set(stems) - known)
 missing = sorted(known - set(stems))
-if missing:
-    print()
-    print("constructs with no matching archive (first 10):")
-    for s in missing[:10]:
-        print(f"  {s}")
+print(f"archives                              {len(stems):>6,}")
+print(f"  matching a manifest row for our two studies  {len(matched):>6,}")
+print(f"  not in our two studies (other papers)        {len(extra):>6,}")
+print(f"manifest rows for our studies with no archive  {len(missing):>6,}")
+for label, names in [("unmatched archive stems", extra), ("manifest rows with no archive", missing)]:
+    if names:
+        print(f"\n{label} (first 8):")
+        for n in names[:8]:
+            print(f"  {n}")
 
 print()
-print("inner contents of the first archive:")
-names, blobs = inner_csvs(archives[0])
+print("inner contents of the first matching archive:")
+probe = stems[matched[0]] if matched else archives[0]
+names, blobs = inner_csvs(probe)
+print(f"  {os.path.basename(probe)}")
 print(f"  csv entries: {names}")
 if names:
     peek = pd.read_csv(io.BytesIO(blobs[names[0]]))
@@ -85,57 +87,57 @@ if inspect_only:
 
 frames = []
 problems = []
-for stem, path in sorted(stems.items()):
-    names, blobs = inner_csvs(path)
+for i, stem in enumerate(matched):
+    if i % 100 == 0:
+        print(f"  reading {i}/{len(matched)}", flush = True)
+    names, blobs = inner_csvs(stems[stem])
     if len(names) != 1:
-        problems.append({'construct': stem, 'issue': f"{len(names)} csv entries"})
+        problems.append({'dataset': stem, 'issue': f"{len(names)} csv entries"})
         if not names:
             continue
     assay = pd.read_csv(io.BytesIO(blobs[names[0]]))
     if score_column not in assay.columns or sequence_column not in assay.columns:
-        problems.append({'construct': stem, 'issue': f"columns {list(assay.columns)[:6]}"})
+        problems.append({'dataset': stem, 'issue': f"columns {list(assay.columns)[:6]}"})
         continue
     keep = assay[[c for c in [sequence_column, score_column, 'mutant'] if c in assay.columns]].copy()
-    keep['construct'] = stem
+    keep['dataset'] = stem
     frames.append(keep)
 
 variants = pd.concat(frames, ignore_index = True)
+variants['construct'] = lookup.loc[variants['dataset'], 'construct'].values
+variants['paper'] = lookup.loc[variants['dataset'], 'paper'].values
+variants['pfam_acc'] = lookup.loc[variants['dataset'], 'pfam accession'].values
 variants['mut_length'] = variants[sequence_column].astype(str).str.len()
 
 print()
 print("=" * 70)
 print("LOADED ASSAY DATA")
 print("=" * 70)
-print(f"archives read        {len(frames):>8,}")
-print(f"problem archives     {len(problems):>8,}")
+print(f"datasets read        {len(frames):>8,}")
+print(f"problem datasets     {len(problems):>8,}")
 print(f"variant rows         {len(variants):>8,}")
 print(f"null scores          {variants[score_column].isna().sum():>8,}")
-
-annotated = variants.merge(constructs[['construct', 'paper', 'pfam_acc', 'wt_sequence', 'n_variants']],
-                           on = 'construct', how = 'left')
-unmatched_rows = annotated['paper'].isna().sum()
 print()
 print("rows by paper:")
-print(annotated.groupby('paper').size().to_string())
-print(f"rows from archives with no manifest match: {unmatched_rows:,}")
+print(variants.groupby('paper').size().to_string())
 
-counts = annotated.groupby('construct').size().rename('loaded')
-check = constructs.set_index('construct')[['n_variants']].join(counts, how = 'inner')
+loaded = variants.groupby('dataset').size().rename('loaded')
+check = lookup.loc[matched, ['n_variants']].join(loaded)
 check['difference'] = check['loaded'] - check['n_variants']
 print()
-print(f"constructs where loaded rows differ from the manifest count: {(check['difference'].abs() > 1).sum()}")
+print(f"datasets where loaded rows differ from the manifest count: {(check['difference'].abs() > 1).sum()}")
 print(f"  median absolute difference: {check['difference'].abs().median():.0f}")
 
 print()
 print("score distribution by paper:")
-print(annotated.groupby('paper')[score_column].describe()[['count', 'mean', 'std', 'min', 'max']].to_string())
+print(variants.groupby('paper')[score_column].describe()[['count', 'mean', 'std', 'min', 'max']].to_string())
 
 variants_path = f"{output_dir}/variants.parquet"
-annotated.to_parquet(variants_path, index = False)
+variants.to_parquet(variants_path, index = False)
 print()
 print(f"Variant table saved to {variants_path}")
 
+check.to_csv(f"{output_dir}/load_rowcount_check.csv")
 if problems:
-    problems_path = f"{output_dir}/load_problems.csv"
-    pd.DataFrame(problems).to_csv(problems_path, index = False)
-    print(f"Problem archives saved to {problems_path}")
+    pd.DataFrame(problems).to_csv(f"{output_dir}/load_problems.csv", index = False)
+    print(f"Problem datasets saved to {output_dir}/load_problems.csv")

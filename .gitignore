@@ -17,3 +17,6 @@ venv/
 *.npz
 *.h5
 *.pt
+
+# SLURM logs
+logs/
