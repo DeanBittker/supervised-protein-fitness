@@ -145,6 +145,19 @@ for i, stem in enumerate(matched):
     keep['dataset'] = stem
     frames.append(keep)
 
+if not frames:
+    # nothing was readable: dump why, so the failure is diagnosable from the log
+    print()
+    print("=" * 70)
+    print("NO DATA LOADED - every archive was rejected")
+    print("=" * 70)
+    issues = pd.DataFrame(problems)
+    if len(issues):
+        print(issues['issue'].value_counts().head(10).to_string())
+        issues.to_csv(f"{output_dir}/load_problems.csv", index = False)
+        print(f"\nfull list: {output_dir}/load_problems.csv")
+    raise SystemExit(1)
+
 variants = pd.concat(frames, ignore_index = True)
 variants['construct'] = lookup.loc[variants['dataset'], 'construct'].values
 variants['paper'] = lookup.loc[variants['dataset'], 'paper'].values
