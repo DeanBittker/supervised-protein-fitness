@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=spf_exploratory
+#SBATCH --job-name=spf_full
 #SBATCH --partition=short
 #SBATCH --time=0-02:00
 #SBATCH --cpus-per-task=2
@@ -29,15 +29,23 @@ echo "=== 2/5 pfam summary ==="
 python3 scripts/pfam_summary.py
 
 echo
-echo "=== 3/5 family clustering ==="
+echo "=== 3/7 msa, identity matrices, clusters, 80/10/10 split ==="
+python3 scripts/msa_identity.py
+
+echo
+echo "=== 4/7 clustering sweep across thresholds ==="
 python3 scripts/cluster_family.py
 
 echo
-echo "=== 4/5 loading assay archives ==="
+echo "=== 5/7 cross-study overlap ==="
+python3 scripts/shared_domains.py
+
+echo
+echo "=== 6/7 loading assay archives ==="
 python3 scripts/load_assays.py
 
 echo
-echo "=== 5/5 assay distribution distances ==="
+echo "=== 7/7 assay distribution distances ==="
 python3 scripts/assay_distances.py
 
 echo
