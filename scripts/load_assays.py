@@ -27,17 +27,27 @@ force_reload = os.environ.get("SPF_FORCE_RELOAD", "") == "1"
 os.makedirs(output_dir, exist_ok = True)
 
 
-def inner_csvs(path):
-    # a .pgarchive is a zipped folder, but fall back to tar in case some are packed differently
-    if zipfile.is_zipfile(path):
-        with zipfile.ZipFile(path) as archive:
-            names = [n for n in archive.namelist() if n.lower().endswith('.csv')]
-            return names, {n: archive.read(n) for n in names}
-    if tarfile.is_tarfile(path):
-        with tarfile.open(path) as archive:
-            names = [n for n in archive.getnames() if n.lower().endswith('.csv')]
-            return names, {n: archive.extractfile(n).read() for n in names}
-    return [], {}
+def read_archive(path):
+    """A .pgarchive is a zip holding dataset.pgdata (itself a zip) and slices.json.
+
+    The nested archive lays its contents out as assays/<name>.csv alongside
+    sequences/, structures/ and msas/ directories, so the assay table is two zip
+    layers down rather than at the top level.
+    """
+    with zipfile.ZipFile(path) as outer:
+        names = outer.namelist()
+        if 'dataset.pgdata' not in names:
+            return None, names, None
+        payload = outer.read('dataset.pgdata')
+        slices = outer.read('slices.json') if 'slices.json' in names else None
+
+    with zipfile.ZipFile(io.BytesIO(payload)) as inner:
+        entries = inner.namelist()
+        assays = [n for n in entries if n.startswith('assays/') and n.lower().endswith('.csv')]
+        if not assays:
+            return None, entries, slices
+        table = pd.read_csv(io.BytesIO(inner.read(assays[0])))
+    return table, entries, slices
 
 
 # archive stems match the manifest filename column, suffixes included, so the join is
@@ -89,32 +99,48 @@ for label, names in [("unmatched archive stems", extra), ("manifest rows with no
 print()
 print("inner contents of the first matching archive:")
 probe = stems[matched[0]] if matched else archives[0]
-names, blobs = inner_csvs(probe)
+peek, entries, _ = read_archive(probe)
 print(f"  {os.path.basename(probe)}")
-print(f"  csv entries: {names}")
-if names:
-    peek = pd.read_csv(io.BytesIO(blobs[names[0]]))
-    print(f"  shape: {peek.shape}")
-    print(f"  columns: {list(peek.columns)}")
+for entry in entries:
+    print(f"    {entry}")
+if peek is not None:
+    print(f"  assay shape: {peek.shape}")
+    print(f"  assay columns: {list(peek.columns)}")
     print(peek.head(3).to_string())
+else:
+    raise SystemExit("could not find an assays/*.csv inside the archive - format changed?")
 
 if inspect_only:
     raise SystemExit("inspect_only is set, stopping before the full load")
 
 frames = []
 problems = []
+inventory = []
 for i, stem in enumerate(matched):
     if i % 100 == 0:
         print(f"  reading {i}/{len(matched)}", flush = True)
-    names, blobs = inner_csvs(stems[stem])
-    if len(names) != 1:
-        problems.append({'dataset': stem, 'issue': f"{len(names)} csv entries"})
-        if not names:
-            continue
-    assay = pd.read_csv(io.BytesIO(blobs[names[0]]))
+    try:
+        assay, entries, slices = read_archive(stems[stem])
+    except Exception as error:
+        problems.append({'dataset': stem, 'issue': f"unreadable: {error}"})
+        continue
+    if assay is None:
+        problems.append({'dataset': stem, 'issue': "no assays/*.csv inside"})
+        continue
     if score_column not in assay.columns or sequence_column not in assay.columns:
         problems.append({'dataset': stem, 'issue': f"columns {list(assay.columns)[:6]}"})
         continue
+
+    # each archive also carries a fasta, a structure and two msas; record what is
+    # present so the inventory is known without reopening a thousand zips later
+    inventory.append({
+        'dataset': stem,
+        'has_fasta': any(e.startswith('sequences/') for e in entries),
+        'has_structure': any(e.startswith('structures/') for e in entries),
+        'n_msas': sum(1 for e in entries if e.startswith('msas/')),
+        'has_slices': slices is not None,
+    })
+
     keep = assay[[c for c in [sequence_column, score_column, 'mutant'] if c in assay.columns]].copy()
     keep['dataset'] = stem
     frames.append(keep)
@@ -154,6 +180,8 @@ print()
 print(f"Variant table saved to {variants_path}")
 
 check.to_csv(f"{output_dir}/load_rowcount_check.csv")
+pd.DataFrame(inventory).to_csv(f"{output_dir}/archive_inventory.csv", index = False)
+print(f"Archive inventory saved to {output_dir}/archive_inventory.csv")
 if problems:
     pd.DataFrame(problems).to_csv(f"{output_dir}/load_problems.csv", index = False)
     print(f"Problem datasets saved to {output_dir}/load_problems.csv")

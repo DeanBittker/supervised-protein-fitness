@@ -98,7 +98,12 @@ print("saved family_size_threshold.png")
 
 # ---------------------------------------------------------------- figure 2
 # clustering behaviour within each study
-report = pd.read_csv(f"{results_dir}/cluster_report.csv")
+cluster_report_path = f"{results_dir}/cluster_report.csv"
+if not os.path.exists(cluster_report_path):
+    print(f"skipping identity_threshold.png: {cluster_report_path} not found")
+    print("  (cluster_family.py needs biotite - run it locally)")
+    raise SystemExit(0)
+report = pd.read_csv(cluster_report_path)
 report['usable'] = (report['n_clusters'] >= 5) & (report['pct_in_largest'] <= 50)
 report['fragmented'] = report['pct_in_largest'] < 15
 report['dominated'] = report['pct_in_largest'] > 50
