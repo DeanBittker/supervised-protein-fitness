@@ -25,8 +25,13 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install --quiet --upgrade pip
 # core set: everything the O2 side needs, all available as wheels
-pip install --quiet numpy pandas scipy matplotlib seaborn pyarrow
+pip install --quiet numpy pandas scipy matplotlib seaborn pyarrow scikit-learn xgboost
 echo "core environment ready"
+
+# fair-esm and torch are only needed for the embedding step, which runs on a GPU
+# node. installed here so the login node can also warm the weight cache.
+pip install --quiet torch fair-esm && echo "torch and fair-esm installed" \
+  || echo "torch/fair-esm failed - embedding step will not run, everything else will"
 
 # biotite is only used by the sequence-level scripts (msa_identity, cluster_family,
 # shared_domains), which run in seconds on a laptop. it has no wheel for python 3.9
