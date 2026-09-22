@@ -79,12 +79,14 @@ def to_alignment_columns(sequences, wt_sequence, aligned_wt):
     columns = [i for i, c in enumerate(aligned_wt) if c != '-']
     width = len(aligned_wt)
     block = np.full((len(sequences), width), '-', dtype='<U1')
+    placed = np.zeros(len(sequences), dtype=bool)
     for row, sequence in enumerate(sequences):
         if len(sequence) != len(wt_sequence):
             continue
         for position, column in enumerate(columns):
             block[row, column] = sequence[position]
-    return block
+        placed[row] = True
+    return block, placed
 
 
 def build_model(name):
@@ -156,6 +158,8 @@ for paper in papers:
         continue
 
     # a split assigns whole domains, so map each domain label to its variants
+    # the embedding matrix is built in this same dataset order, before any row filter
+    datasets_present = sorted(paper_rows['dataset'].unique())
     # project every variant onto its family's alignment columns once per paper
     alignment = read_alignment(f"{results_dir}/msa/{paper}_{family}.fasta")
     wt_of = dict(zip(constructs['construct'], constructs['wt_sequence']))
@@ -164,24 +168,40 @@ for paper in papers:
     # label or those variants are silently left out of every partition
     split_of_wt = {wt_of[row['label']]: row['split']
                    for _, row in labels.iterrows() if row['label'] in wt_of}
-    blocks = []
+    width = len(next(iter(alignment.values())))
+    blocks, placed_parts, gaps = [], [], []
     for dataset in sorted(paper_rows['dataset'].unique()):
         rows_here = paper_rows[paper_rows['dataset'] == dataset]
         wt = wt_of.get(rows_here['construct'].iloc[0])
         if wt is None or wt not in alignment:
-            print(f"  no alignment row for {dataset}, its variants are dropped from onehot")
-            blocks.append(np.full((len(rows_here), len(next(iter(alignment.values())))), '-', dtype='<U1'))
+            print(f"  no alignment row for {dataset}, its variants cannot be encoded")
+            blocks.append(np.full((len(rows_here), width), '-', dtype='<U1'))
+            placed_parts.append(np.zeros(len(rows_here), dtype=bool))
             continue
-        blocks.append(to_alignment_columns(
-            rows_here['mutated_sequence'].astype(str).tolist(), wt, alignment[wt]))
+        block, placed = to_alignment_columns(
+            rows_here['mutated_sequence'].astype(str).tolist(), wt, alignment[wt])
+        blocks.append(block)
+        placed_parts.append(placed)
+        lengths = rows_here['mutated_sequence'].astype(str).str.len().values
+        gaps.extend((lengths[~placed] - len(wt)).tolist())
     chars = np.concatenate(blocks)
-    print(f"{paper}: {chars.shape[1]} alignment columns, {len(paper_rows):,} variants")
+    placed = np.concatenate(placed_parts)
+
+    # a variant that does not match its wild type's length cannot be projected onto
+    # the alignment. those rows are dropped from every encoding, not just one-hot,
+    # so the encodings are always compared on an identical row set.
+    if (~placed).any():
+        offsets = pd.Series(gaps).value_counts().head(5)
+        print(f"{paper}: {int((~placed).sum()):,} variants do not match their wild-type length and are dropped")
+        print(f"  length difference from wild type: {dict(offsets)}")
+    paper_rows = paper_rows[placed].copy()
+    chars = chars[placed]
+    print(f"{paper}: {chars.shape[1]} alignment columns, {len(paper_rows):,} variants encoded")
 
     if dry_run:
         usable = [d for d in paper_rows['dataset'].unique() if d in embeddings]
         print(f"  embeddings usable for {len(usable)} of {paper_rows['dataset'].nunique()} datasets")
-        covered = (chars != '-').any(axis = 1).sum()
-        print(f"  variants placed into alignment columns: {covered:,} of {len(chars):,}")
+        print(f"  variants placed into alignment columns: {len(chars):,}")
         first = labels[labels['replicate'] == 0]
         first_of_wt = {wt_of[row['label']]: row['split']
                        for _, row in first.iterrows() if row['label'] in wt_of}
@@ -212,7 +232,7 @@ for paper in papers:
                 X_train = encoder.fit_transform(chars[train_mask])
                 X_test = encoder.transform(chars[test_mask])
             else:
-                matrix = np.concatenate([embeddings[d] for d in sorted(paper_rows['dataset'].unique())])
+                matrix = np.concatenate([embeddings[d] for d in sorted(datasets_present)])[placed]
                 X_train = matrix[train_mask]
                 X_test = matrix[test_mask]
 
