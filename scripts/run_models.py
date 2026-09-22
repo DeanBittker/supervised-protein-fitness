@@ -26,6 +26,7 @@ encodings = ['onehot', 'ESM2-150M']
 models = ['ridge', 'rf', 'xgb']
 targets = ['raw', 'zscore']
 drop_insertions = True
+dry_run = os.environ.get("SPF_DRYRUN", "") == "1"
 
 os.makedirs(results_dir, exist_ok = True)
 print(f"family {family}, threshold {threshold:.0%}, {n_replicates} replicates, n_jobs {n_jobs}")
@@ -158,6 +159,11 @@ for paper in papers:
     # project every variant onto its family's alignment columns once per paper
     alignment = read_alignment(f"{results_dir}/msa/{paper}_{family}.fasta")
     wt_of = dict(zip(constructs['construct'], constructs['wt_sequence']))
+    # a split names one representative construct per domain, but several constructs
+    # can share a wild-type sequence, so route through the sequence rather than the
+    # label or those variants are silently left out of every partition
+    split_of_wt = {wt_of[row['label']]: row['split']
+                   for _, row in labels.iterrows() if row['label'] in wt_of}
     blocks = []
     for dataset in sorted(paper_rows['dataset'].unique()):
         rows_here = paper_rows[paper_rows['dataset'] == dataset]
@@ -171,6 +177,21 @@ for paper in papers:
     chars = np.concatenate(blocks)
     print(f"{paper}: {chars.shape[1]} alignment columns, {len(paper_rows):,} variants")
 
+    if dry_run:
+        usable = [d for d in paper_rows['dataset'].unique() if d in embeddings]
+        print(f"  embeddings usable for {len(usable)} of {paper_rows['dataset'].nunique()} datasets")
+        covered = (chars != '-').any(axis = 1).sum()
+        print(f"  variants placed into alignment columns: {covered:,} of {len(chars):,}")
+        first = labels[labels['replicate'] == 0]
+        first_of_wt = {wt_of[row['label']]: row['split']
+                       for _, row in first.iterrows() if row['label'] in wt_of}
+        membership = paper_rows['construct'].map(wt_of).map(first_of_wt)
+        print(f"  replicate 0 rows -> train {int((membership == 'train').sum()):,}  "
+              f"validate {int((membership == 'validate').sum()):,}  "
+              f"test {int((membership == 'test').sum()):,}  "
+              f"unmapped {int(membership.isna().sum()):,}")
+        continue
+
     for encoding in encodings:
         if encoding == 'ESM2-150M' and any(d not in embeddings for d in paper_rows['dataset'].unique()):
             print(f"skipping {paper} / {encoding}: embeddings incomplete")
@@ -178,8 +199,9 @@ for paper in papers:
 
         for replicate in range(n_replicates):
             assignment = labels[labels['replicate'] == replicate]
-            split_of = dict(zip(assignment['label'], assignment['split']))
-            membership = paper_rows['construct'].map(split_of)
+            split_of = {wt_of[row['label']]: row['split']
+                        for _, row in assignment.iterrows() if row['label'] in wt_of}
+            membership = paper_rows['construct'].map(wt_of).map(split_of)
             train_mask = (membership == 'train').values
             test_mask = (membership == 'test').values
             if train_mask.sum() == 0 or test_mask.sum() == 0:
@@ -232,6 +254,11 @@ for paper in papers:
                             subset = ['paper', 'encoding', 'model', 'target', 'replicate'], keep = 'last')
                     frame.to_csv(cache_path, index = False)
                     rows = []
+
+if dry_run:
+    print()
+    print("dry run: nothing was fitted. unset SPF_DRYRUN to run the grid.")
+    raise SystemExit(0)
 
 print()
 print(f"Results saved to {cache_path}")
