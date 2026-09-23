@@ -29,11 +29,13 @@ os.makedirs(figure_dir, exist_ok = True)
 # came from, or the effect of the variant itself? ridge alone, because the question
 # is about the features rather than the learner, and it keeps the run to minutes.
 
+slide = os.environ.get("SPF_SLIDE", "") == "1"
+scale = 1.4 if slide else 1.0
 blue, vermillion = "#0072B2", "#D55E00"
 ink, muted = "#1a1a1a", "#6b6b6b"
 colour = {'onehot': blue, 'ESM2-150M': vermillion}
 plt.rcParams.update({
-    "figure.dpi": 150, "savefig.dpi": 200, "font.size": 11,
+    "figure.dpi": 150, "savefig.dpi": 200, "font.size": 11 * scale,
     "axes.edgecolor": muted, "axes.labelcolor": ink, "text.color": ink,
     "xtick.color": muted, "ytick.color": muted,
     "axes.spines.top": False, "axes.spines.right": False,
@@ -172,10 +174,10 @@ summary = report.groupby(['paper', 'encoding'])[
      'between_domain_variance_fraction']].median().round(3)
 print(summary.to_string())
 
-fig, axes = plt.subplots(1, 2, figsize = (12, 5), sharey = True)
-measures = ['within_domain_rho', 'rho_with_domain_mean']
-titles = ['Correlation within each held-out domain\n(genuine variant-level signal)',
-          "Correlation with the domain's mean score\n(signal that is only domain identity)"]
+fig, axes = plt.subplots(1, 2, figsize = (12 * scale, 5 * scale))
+measures = ['within_domain_rho', 'between_domain_variance_fraction']
+titles = ['Correlation within each held-out protein\n(genuine variant-level signal)',
+          'Fraction of prediction variance that is\nbetween proteins rather than within']
 rng = np.random.default_rng(67)
 for ax, measure, title in zip(axes, measures, titles):
     ax.grid(True, axis = 'y', zorder = 0)
@@ -196,12 +198,15 @@ for ax, measure, title in zip(axes, measures, titles):
                       color = colour[encoding], linewidth = 2.6, zorder = 4)
     ax.set_xticks(range(len(papers)))
     ax.set_xticklabels(['Lehner 2025', 'Rocklin 2023'])
-    ax.set_title(title, loc = 'left', fontsize = 10.5)
+    ax.set_title(title, loc = 'left', fontsize = 10.5 * scale)
+    if measure == 'between_domain_variance_fraction':
+        ax.set_ylim(0, 1)
+        ax.set_ylabel('fraction of prediction variance')
 axes[0].set_ylabel("Spearman $\\rho$")
-axes[0].legend(loc = 'upper left', fontsize = 10)
+axes[0].legend(loc = 'upper left', fontsize = 10 * scale)
 fig.suptitle(f"{family}: what the prediction is actually tracking (Ridge, raw target)",
-             fontsize = 12.5, x = 0.02, ha = 'left')
-plt.tight_layout(rect = [0, 0, 1, 0.9])
+             fontsize = 12.5 * scale, x = 0.02, ha = 'left')
+plt.tight_layout(rect = [0, 0, 1, 0.93])
 path = f"{figure_dir}/domain_mean_control_{family}.png"
 plt.savefig(path)
 plt.close()

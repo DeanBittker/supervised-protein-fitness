@@ -168,10 +168,12 @@ print(loco.groupby(['scope', 'threshold'])['fold'].nunique().to_string())
 splits.to_csv(f"{results_dir}/splits_{family}.csv", index = False)
 loco.to_csv(f"{results_dir}/loco_{family}.csv", index = False)
 summary.to_csv(f"{results_dir}/split_summary_{family}.csv", index = False)
+slide = os.environ.get("SPF_SLIDE", "") == "1"
+scale = 1.4 if slide else 1.0
 blue, vermillion, green = "#0072B2", "#D55E00", "#009E73"
 ink, muted = "#1a1a1a", "#6b6b6b"
 plt.rcParams.update({
-    "figure.dpi": 150, "savefig.dpi": 200, "font.size": 11,
+    "figure.dpi": 150, "savefig.dpi": 200, "font.size": 11 * scale,
     "axes.edgecolor": muted, "axes.labelcolor": ink, "text.color": ink,
     "xtick.color": muted, "ytick.color": muted,
     "axes.spines.top": False, "axes.spines.right": False,
@@ -179,7 +181,7 @@ plt.rcParams.update({
 })
 
 labels = {'lehner': 'Lehner 2025  (human)', 'rocklin': 'Rocklin 2023  (across nature)', 'pooled': 'Both studies pooled'}
-fig, axes = plt.subplots(1, 3, figsize = (14, 4.6), sharey = True)
+fig, axes = plt.subplots(1, 3, figsize = (14 * scale, 4.6 * scale), sharey = True)
 rng = np.random.default_rng(rng_seed)
 for ax, scope in zip(axes, scopes):
     ax.grid(True, axis = 'y', zorder = 0)
@@ -198,13 +200,13 @@ for ax, scope in zip(axes, scopes):
     ax.axhline(ideal, color = green, linestyle = '--', linewidth = 1.6, zorder = 2,
                label = '10% test share')
     ax.annotate(f'{ideal:.1f} domains', xy = (0.985, ideal), xycoords = ('axes fraction', 'data'),
-                ha = 'right', va = 'bottom', fontsize = 9, color = green)
+                ha = 'right', va = 'bottom', fontsize = 9 * scale, color = green)
     ax.set_xlabel('sequence identity threshold (percent)')
-    ax.set_title(f"{labels[scope]} — {n_domains} domains", loc = 'left', fontsize = 11)
+    ax.set_title(f"{labels[scope]} — {n_domains} domains", loc = 'left', fontsize = 11 * scale)
 axes[0].set_ylabel('domains in cluster')
-axes[0].legend(loc = 'upper left', fontsize = 9)
+axes[0].legend(loc = 'upper left', fontsize = 9 * scale)
 fig.suptitle(f"{family}: cluster size distribution by threshold. Clusters above the dashed line cannot fit in a 10% test set",
-             fontsize = 12.5, x = 0.02, ha = 'left')
+             fontsize = 12.5 * scale, x = 0.02, ha = 'left')
 plt.tight_layout(rect = [0, 0, 1, 0.92])
 figure_path = f"{figure_dir}/cluster_sizes_{family}.png"
 plt.savefig(figure_path)

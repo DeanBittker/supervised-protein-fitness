@@ -21,10 +21,12 @@ models = ['ridge', 'rf', 'xgb']
 
 os.makedirs(figure_dir, exist_ok = True)
 
+slide = os.environ.get("SPF_SLIDE", "") == "1"
+scale = 1.4 if slide else 1.0
 blue, vermillion = "#0072B2", "#D55E00"
 ink, muted = "#1a1a1a", "#6b6b6b"
 plt.rcParams.update({
-    "figure.dpi": 150, "savefig.dpi": 200, "font.size": 11,
+    "figure.dpi": 150, "savefig.dpi": 200, "font.size": 11 * scale,
     "axes.edgecolor": muted, "axes.labelcolor": ink, "text.color": ink,
     "xtick.color": muted, "ytick.color": muted,
     "axes.spines.top": False, "axes.spines.right": False,
@@ -65,7 +67,7 @@ print(f"PAIRED COMPARISON — {challenger} minus {baseline}, Wilcoxon signed ran
 print("=" * 100)
 print(report.to_string(index = False))
 
-fig, axes = plt.subplots(1, len(targets), figsize = (12, 5), sharey = True)
+fig, axes = plt.subplots(1, len(targets), figsize = (12 * scale, 5 * scale), sharey = True)
 rng = np.random.default_rng(67)
 for ax, target in zip(axes, targets):
     ax.grid(True, axis = 'y', zorder = 0)
@@ -90,17 +92,17 @@ for ax, target in zip(axes, targets):
             positions.append(x)
             labels.append(model.upper() if model != 'ridge' else 'Ridge')
     ax.set_xticks(positions)
-    ax.set_xticklabels(labels, fontsize = 9.5)
+    ax.set_xticklabels(labels, fontsize = 9.5 * scale)
     # the study name sits below the model ticks, not on top of the middle one
     for index, paper in enumerate(papers):
         ax.annotate(paper.capitalize(), xy = (index, -0.115), xycoords = ('data', 'axes fraction'),
-                    ha = 'center', va = 'top', fontsize = 11.5)
+                    ha = 'center', va = 'top', fontsize = 11.5 * scale)
     ax.set_xlim(-0.45, len(papers) - 1 + 0.45)
     ax.set_title('raw DMS score' if target == 'raw' else 'z-scored within dataset', loc = 'left')
 axes[0].set_ylabel("Spearman $\\rho$ difference per replicate")
 fig.suptitle(f"{family}: one-hot minus ESM2-150M, paired on the same split\n"
              f"above the line means one-hot won that replicate",
-             fontsize = 12.5, x = 0.02, ha = 'left')
+             fontsize = 12.5 * scale, x = 0.02, ha = 'left')
 plt.tight_layout(rect = [0, 0.05, 1, 0.91])
 suffix = "_per_protein" if metric == "test_spearman_per_protein" else ""
 path = f"{figure_dir}/paired_test_{family}{suffix}.png"

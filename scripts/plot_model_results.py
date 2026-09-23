@@ -19,18 +19,20 @@ encodings = ['onehot', 'ESM2-150M']
 
 os.makedirs(figure_dir, exist_ok = True)
 
+slide = os.environ.get("SPF_SLIDE", "") == "1"
+scale = 1.4 if slide else 1.0
 # okabe-ito pair, checked for colourblind separation against a light surface
 blue, vermillion = "#0072B2", "#D55E00"
 ink, muted = "#1a1a1a", "#6b6b6b"
 colour = {'onehot': blue, 'ESM2-150M': vermillion}
 paper_label = {'lehner': 'Lehner 2025  (human)', 'rocklin': 'Rocklin 2023  (across nature)'}
 target_label = {'raw': 'raw DMS score', 'zscore': 'z-scored within dataset'}
-metric_label = {'test_spearman_per_protein': "Spearman $\\rho$, averaged over held-out proteins",
-                'test_spearman': "Spearman $\\rho$, pooled over held-out proteins",
+metric_label = {'test_spearman_per_protein': "Spearman $\\rho$, averaged within protein",
+                'test_spearman': "Spearman $\\rho$, pooled across proteins",
                 'test_r2': "$R^2$ on held-out domains"}
 
 plt.rcParams.update({
-    "figure.dpi": 150, "savefig.dpi": 200, "font.size": 11,
+    "figure.dpi": 150, "savefig.dpi": 200, "font.size": 11 * scale,
     "axes.edgecolor": muted, "axes.labelcolor": ink, "text.color": ink,
     "xtick.color": muted, "ytick.color": muted,
     "axes.spines.top": False, "axes.spines.right": False,
@@ -41,7 +43,7 @@ results = pd.read_csv(f"{results_dir}/model_results_{family}.csv")
 print(f"{len(results)} cells, {results['replicate'].nunique()} replicates")
 
 rng = np.random.default_rng(67)
-fig, axes = plt.subplots(len(targets), len(papers), figsize = (12, 8), sharey = True)
+fig, axes = plt.subplots(len(targets), len(papers), figsize = (12 * scale, 8 * scale), sharey = True)
 
 for row, target in enumerate(targets):
     for col, paper in enumerate(papers):
@@ -70,16 +72,16 @@ for row, target in enumerate(targets):
         ax.set_xticklabels([m.upper() if m != 'ridge' else 'Ridge' for m in models])
         ax.set_xlim(-0.5, len(models) - 0.5)
         if row == 0:
-            ax.set_title(paper_label[paper], loc = 'left', fontsize = 11.5)
+            ax.set_title(paper_label[paper], loc = 'left', fontsize = 11.5 * scale)
         if col == 0:
-            ax.set_ylabel(f"{target_label[target]}\n{metric_label[metric]}", fontsize = 10)
+            ax.set_ylabel(f"{target_label[target]}\n{metric_label[metric]}", fontsize = 10 * scale)
 
-axes[0, 0].legend(loc = 'upper left', fontsize = 10)
+axes[0, 0].legend(loc = 'upper left', fontsize = 10 * scale)
 headline = ("averaged within each held-out protein"
             if metric == 'test_spearman_per_protein' else "pooled across held-out proteins")
 fig.suptitle(f"{family}: held-out domain performance, {headline}\n"
              f"one point per split replicate, clusters at 60% identity",
-             fontsize = 13, x = 0.02, ha = 'left')
+             fontsize = 13 * scale, x = 0.02, ha = 'left')
 plt.tight_layout(rect = [0, 0, 1, 0.93])
 suffix = "_per_protein" if metric == "test_spearman_per_protein" else ""
 path = f"{figure_dir}/model_results_{family}{suffix}.png"
