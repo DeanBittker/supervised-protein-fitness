@@ -252,6 +252,15 @@ for paper in papers:
                     train_pred = model.predict(X_train[keep_train])
                     test_pred = model.predict(X_test[keep_test])
 
+                    # ranking variants from independent experiments against each
+                    # other is not meaningful, so the per-protein average is the
+                    # primary figure and the pooled one is kept for comparison
+                    scored = paper_rows[test_mask][keep_test].assign(
+                        truth = Y_test[keep_test], prediction = test_pred)
+                    per_protein = [rho(group['truth'], group['prediction'])
+                                   for _, group in scored.groupby('dataset')
+                                   if len(group) > 10 and group['truth'].std() > 0]
+
                     rows.append({
                         'paper': paper, 'encoding': encoding, 'model': model_name,
                         'target': target, 'replicate': replicate,
@@ -262,9 +271,16 @@ for paper in papers:
                         'test_r2': round(float(r2(Y_test[keep_test], test_pred)), 4),
                         'train_spearman': round(float(rho(Y_train[keep_train], train_pred)), 4),
                         'test_spearman': round(float(rho(Y_test[keep_test], test_pred)), 4),
+                        'test_spearman_per_protein': round(float(np.mean(per_protein)), 4)
+                            if per_protein else np.nan,
+                        'test_spearman_per_protein_sd': round(float(np.std(per_protein)), 4)
+                            if len(per_protein) > 1 else np.nan,
+                        'n_test_proteins_scored': len(per_protein),
                     })
                     print(f"  {paper:8s} {encoding:10s} {model_name:5s} {target:6s} rep {replicate:2d}  "
-                          f"test R2 {rows[-1]['test_r2']:7.4f}  rho {rows[-1]['test_spearman']:7.4f}", flush=True)
+                          f"pooled rho {rows[-1]['test_spearman']:7.4f}  "
+                          f"per-protein rho {rows[-1]['test_spearman_per_protein']:7.4f} "
+                          f"(n={rows[-1]['n_test_proteins_scored']})", flush=True)
 
                     # written every cell so a preempted job resumes rather than restarts
                     frame = pd.DataFrame(rows)
@@ -285,5 +301,5 @@ print(f"Results saved to {cache_path}")
 final = pd.read_csv(cache_path)
 print(f"{len(final)} cells complete")
 print()
-print(final.groupby(['paper', 'encoding', 'model', 'target'])['test_spearman']
-      .agg(['mean', 'std', 'count']).round(3).to_string())
+print(final.groupby(['paper', 'encoding', 'model', 'target'])[
+    ['test_spearman_per_protein', 'test_spearman']].agg(['median', 'std']).round(3).to_string())

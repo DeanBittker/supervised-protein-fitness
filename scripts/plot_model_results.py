@@ -11,7 +11,7 @@ output_root = os.environ.get("SPF_OUTPUT", project_dir)
 results_dir = f"{output_root}/results"
 figure_dir = f"{output_root}/figures"
 family = os.environ.get("SPF_FAMILY", "PF00018")
-metric = os.environ.get("SPF_METRIC", "test_spearman")
+metric = os.environ.get("SPF_METRIC", "test_spearman_per_protein")
 papers = ['lehner', 'rocklin']
 targets = ['raw', 'zscore']
 models = ['ridge', 'rf', 'xgb']
@@ -25,7 +25,8 @@ ink, muted = "#1a1a1a", "#6b6b6b"
 colour = {'onehot': blue, 'ESM2-150M': vermillion}
 paper_label = {'lehner': 'Lehner 2025  (human)', 'rocklin': 'Rocklin 2023  (across nature)'}
 target_label = {'raw': 'raw DMS score', 'zscore': 'z-scored within dataset'}
-metric_label = {'test_spearman': "Spearman $\\rho$ on held-out domains",
+metric_label = {'test_spearman_per_protein': "Spearman $\\rho$, averaged over held-out proteins",
+                'test_spearman': "Spearman $\\rho$, pooled over held-out proteins",
                 'test_r2': "$R^2$ on held-out domains"}
 
 plt.rcParams.update({
@@ -74,16 +75,20 @@ for row, target in enumerate(targets):
             ax.set_ylabel(f"{target_label[target]}\n{metric_label[metric]}", fontsize = 10)
 
 axes[0, 0].legend(loc = 'upper left', fontsize = 10)
-fig.suptitle(f"{family}: held-out domain performance, one point per split replicate\n"
-             f"clusters at 60% identity, whole clusters held out",
+headline = ("averaged within each held-out protein"
+            if metric == 'test_spearman_per_protein' else "pooled across held-out proteins")
+fig.suptitle(f"{family}: held-out domain performance, {headline}\n"
+             f"one point per split replicate, clusters at 60% identity",
              fontsize = 13, x = 0.02, ha = 'left')
 plt.tight_layout(rect = [0, 0, 1, 0.93])
-path = f"{figure_dir}/model_results_{family}.png"
+suffix = "_per_protein" if metric == "test_spearman_per_protein" else ""
+path = f"{figure_dir}/model_results_{family}{suffix}.png"
 plt.savefig(path)
 plt.close()
 print(f"saved {path}")
 
-summary = (results.groupby(['paper', 'encoding', 'model', 'target'])[['test_spearman', 'test_r2']]
+summary = (results.groupby(['paper', 'encoding', 'model', 'target'])[
+               [c for c in ['test_spearman_per_protein', 'test_spearman', 'test_r2'] if c in results]]
            .agg(['median', 'std', 'count']).round(3))
 summary.to_csv(f"{results_dir}/model_summary_{family}.csv")
 print()

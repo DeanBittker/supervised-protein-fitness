@@ -12,7 +12,7 @@ output_root = os.environ.get("SPF_OUTPUT", project_dir)
 results_dir = f"{output_root}/results"
 figure_dir = f"{output_root}/figures"
 family = os.environ.get("SPF_FAMILY", "PF00018")
-metric = "test_spearman"
+metric = os.environ.get("SPF_METRIC", "test_spearman_per_protein")
 baseline = "ESM2-150M"
 challenger = "onehot"
 papers = ['lehner', 'rocklin']
@@ -102,9 +102,10 @@ fig.suptitle(f"{family}: one-hot minus ESM2-150M, paired on the same split\n"
              f"above the line means one-hot won that replicate",
              fontsize = 12.5, x = 0.02, ha = 'left')
 plt.tight_layout(rect = [0, 0.05, 1, 0.91])
-path = f"{figure_dir}/paired_test_{family}.png"
+suffix = "_per_protein" if metric == "test_spearman_per_protein" else ""
+path = f"{figure_dir}/paired_test_{family}{suffix}.png"
 plt.savefig(path)
 plt.close()
 print()
 print(f"saved {path}")
-report.to_csv(f"{results_dir}/paired_test_{family}.csv", index = False)
+report.to_csv(f"{results_dir}/paired_test_{family}{suffix}.csv", index = False)
