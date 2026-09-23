@@ -25,9 +25,12 @@ export SPF_OUTPUT=${SPF_OUTPUT:-/n/groups/marks/projects/ProteinGym_supervised/2
 export SPF_FAMILY=${SPF_FAMILY:-PF00018}
 export SPF_THRESHOLD=${SPF_THRESHOLD:-0.6}
 export SPF_REPLICATES=${SPF_REPLICATES:-10}
+# set SPF_SPLIT_MODE=loco to hold out one cluster at a time instead of a random tenth,
+# which is the only way every domain reaches a test set. writes loco_results_<family>.csv
+export SPF_SPLIT_MODE=${SPF_SPLIT_MODE:-replicate}
 
 echo "host: $(hostname)   cores: $SLURM_CPUS_PER_TASK"
-echo "family: $SPF_FAMILY   threshold: $SPF_THRESHOLD   replicates: $SPF_REPLICATES"
+echo "family: $SPF_FAMILY   threshold: $SPF_THRESHOLD   replicates: $SPF_REPLICATES   split mode: $SPF_SPLIT_MODE"
 echo "started: $(date)"
 
 python3 scripts/run_models.py

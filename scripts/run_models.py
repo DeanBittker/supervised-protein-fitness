@@ -19,6 +19,10 @@ variants_path = f"{results_dir}/variants.parquet"
 family = os.environ.get("SPF_FAMILY", "PF00018")
 threshold = float(os.environ.get("SPF_THRESHOLD", "0.6"))
 n_replicates = int(os.environ.get("SPF_REPLICATES", "10"))
+# "replicate" holds out a random tenth of the clusters twenty times over; "loco" holds
+# out one cluster at a time, so every domain is tested exactly once. the random splits
+# never reach most domains, because a large cluster cannot fit inside a tenth
+split_mode = os.environ.get("SPF_SPLIT_MODE", "replicate")
 n_jobs = int(os.environ.get("SLURM_CPUS_PER_TASK", "4"))
 cache_tag = "esm150M"
 papers = ['lehner', 'rocklin']
@@ -32,7 +36,7 @@ max_wt_overhang = 4
 dry_run = os.environ.get("SPF_DRYRUN", "") == "1"
 
 os.makedirs(results_dir, exist_ok = True)
-print(f"family {family}, threshold {threshold:.0%}, {n_replicates} replicates, n_jobs {n_jobs}")
+print(f"family {family}, threshold {threshold:.0%}, split mode {split_mode}, n_jobs {n_jobs}")
 
 
 def r2(y, p):
@@ -122,7 +126,11 @@ variants['score_raw'] = variants['DMS_score']
 variants['score_zscore'] = (variants['DMS_score'] - grouped.transform('mean')) / grouped.transform('std')
 
 constructs = pd.read_csv(f"{results_dir}/constructs.csv")
-splits = pd.read_csv(f"{results_dir}/splits_{family}.csv")
+if split_mode == 'loco':
+    fold_column, result_name = 'fold', f"loco_results_{family}.csv"
+else:
+    fold_column, result_name = 'replicate', f"model_results_{family}.csv"
+splits = pd.read_csv(f"{results_dir}/{'loco' if split_mode == 'loco' else 'splits'}_{family}.csv")
 splits = splits[np.isclose(splits['threshold'], threshold)]
 
 # embeddings are cached one file per dataset, in the same row order as the
@@ -151,11 +159,11 @@ if stale:
 if missing:
     print(f"WARNING: {len(missing)} datasets have no usable embedding, ESM2-150M cells will be skipped")
 
-cache_path = f"{results_dir}/model_results_{family}.csv"
+cache_path = f"{results_dir}/{result_name}"
 done = set()
 if os.path.exists(cache_path):
     previous = pd.read_csv(cache_path)
-    done = set(map(tuple, previous[['paper', 'encoding', 'model', 'target', 'replicate']].values))
+    done = set(map(tuple, previous[['paper', 'encoding', 'model', 'target', fold_column]].values))
     print(f"resuming: {len(done)} cells already done")
 
 rows = []
@@ -164,6 +172,10 @@ for paper in papers:
     if paper_rows.empty:
         continue
     labels = splits[splits['scope'] == paper]
+    # leave-one-cluster-out runs as many folds as there are clusters; the random
+    # splits run a fixed number of replicates regardless of how many there are
+    folds = (sorted(labels[fold_column].unique()) if split_mode == 'loco'
+             else list(range(n_replicates)))
     if labels.empty:
         print(f"no split for {paper} at this threshold, skipped")
         continue
@@ -213,11 +225,11 @@ for paper in papers:
         usable = [d for d in paper_rows['dataset'].unique() if d in embeddings]
         print(f"  embeddings usable for {len(usable)} of {paper_rows['dataset'].nunique()} datasets")
         print(f"  variants placed into alignment columns: {len(chars):,}")
-        first = labels[labels['replicate'] == 0]
+        first = labels[labels[fold_column] == folds[0]]
         first_of_wt = {wt_of[row['label']]: row['split']
                        for _, row in first.iterrows() if row['label'] in wt_of}
         membership = paper_rows['construct'].map(wt_of).map(first_of_wt)
-        print(f"  replicate 0 rows -> train {int((membership == 'train').sum()):,}  "
+        print(f"  fold {folds[0]} rows -> train {int((membership == 'train').sum()):,}  "
               f"validate {int((membership == 'validate').sum()):,}  "
               f"test {int((membership == 'test').sum()):,}  "
               f"unmapped {int(membership.isna().sum()):,}")
@@ -228,8 +240,8 @@ for paper in papers:
             print(f"skipping {paper} / {encoding}: embeddings incomplete")
             continue
 
-        for replicate in range(n_replicates):
-            assignment = labels[labels['replicate'] == replicate]
+        for fold in folds:
+            assignment = labels[labels[fold_column] == fold]
             split_of = {wt_of[row['label']]: row['split']
                         for _, row in assignment.iterrows() if row['label'] in wt_of}
             membership = paper_rows['construct'].map(wt_of).map(split_of)
@@ -250,7 +262,7 @@ for paper in papers:
             for target in targets:
                 column = f"score_{target}"
                 for model_name in models:
-                    key = (paper, encoding, model_name, target, replicate)
+                    key = (paper, encoding, model_name, target, fold)
                     if key in done:
                         continue
                     Y_train = paper_rows.loc[train_mask, column].values
@@ -274,7 +286,7 @@ for paper in papers:
 
                     rows.append({
                         'paper': paper, 'encoding': encoding, 'model': model_name,
-                        'target': target, 'replicate': replicate,
+                        'target': target, fold_column: fold,
                         'n_train': int(keep_train.sum()), 'n_test': int(keep_test.sum()),
                         'n_train_domains': int(assignment[assignment['split'] == 'train'].shape[0]),
                         'n_test_domains': int(assignment[assignment['split'] == 'test'].shape[0]),
@@ -288,7 +300,7 @@ for paper in papers:
                             if len(per_protein) > 1 else np.nan,
                         'n_test_proteins_scored': len(per_protein),
                     })
-                    print(f"  {paper:8s} {encoding:10s} {model_name:5s} {target:6s} rep {replicate:2d}  "
+                    print(f"  {paper:8s} {encoding:10s} {model_name:5s} {target:6s} fold {fold:3}  "
                           f"pooled rho {rows[-1]['test_spearman']:7.4f}  "
                           f"per-protein rho {rows[-1]['test_spearman_per_protein']:7.4f} "
                           f"(n={rows[-1]['n_test_proteins_scored']})", flush=True)
@@ -298,7 +310,7 @@ for paper in papers:
                     if os.path.exists(cache_path):
                         frame = pd.concat([pd.read_csv(cache_path), frame], ignore_index = True)
                         frame = frame.drop_duplicates(
-                            subset = ['paper', 'encoding', 'model', 'target', 'replicate'], keep = 'last')
+                            subset = ['paper', 'encoding', 'model', 'target', fold_column], keep = 'last')
                     frame.to_csv(cache_path, index = False)
                     rows = []
 

@@ -39,8 +39,11 @@ plt.rcParams.update({
     "legend.frameon": False, "grid.color": "#e4e4e2", "grid.linewidth": 0.8,
 })
 
-results = pd.read_csv(f"{results_dir}/model_results_{family}.csv")
-print(f"{len(results)} cells, {results['replicate'].nunique()} replicates")
+split_mode = os.environ.get("SPF_SPLIT_MODE", "replicate")
+stem = f"loco_results_{family}" if split_mode == 'loco' else f"model_results_{family}"
+results = pd.read_csv(f"{results_dir}/{stem}.csv")
+fold_column = 'fold' if split_mode == 'loco' else 'replicate'
+print(f"{len(results)} cells, {results[fold_column].nunique()} {fold_column}s")
 
 rng = np.random.default_rng(67)
 fig, axes = plt.subplots(len(targets), len(papers), figsize = (12 * scale, 8 * scale), sharey = True)
@@ -80,11 +83,12 @@ axes[0, 0].legend(loc = 'upper left', fontsize = 10 * scale)
 headline = ("averaged within each held-out protein"
             if metric == 'test_spearman_per_protein' else "pooled across held-out proteins")
 fig.suptitle(f"{family}: held-out domain performance, {headline}\n"
-             f"one point per split replicate, clusters at 60% identity",
+             f"{'one point per held-out cluster' if split_mode == 'loco' else 'one point per split replicate'}"
+             f", clusters at 60% identity",
              fontsize = 13 * scale, x = 0.02, ha = 'left')
 plt.tight_layout(rect = [0, 0, 1, 0.93])
 suffix = "_per_protein" if metric == "test_spearman_per_protein" else ""
-path = f"{figure_dir}/model_results_{family}{suffix}.png"
+path = f"{figure_dir}/{stem}{suffix}.png"
 plt.savefig(path)
 plt.close()
 print(f"saved {path}")
@@ -92,6 +96,6 @@ print(f"saved {path}")
 summary = (results.groupby(['paper', 'encoding', 'model', 'target'])[
                [c for c in ['test_spearman_per_protein', 'test_spearman', 'test_r2'] if c in results]]
            .agg(['median', 'std', 'count']).round(3))
-summary.to_csv(f"{results_dir}/model_summary_{family}.csv")
+summary.to_csv(f"{results_dir}/{stem.replace('results', 'summary')}.csv")
 print()
 print(summary.to_string())
