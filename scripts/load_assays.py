@@ -112,6 +112,40 @@ for label, names in [("unmatched archive stems", extra), ("manifest rows with no
         for n in names[:8]:
             print(f"  {n}")
 
+
+# a manifest row and its archive can disagree about which pfam accession belongs in the
+# name: PO3F2_HUMAN is recorded as PF00157 and shipped as PF00046. a row that found no
+# archive gets one more chance on its name with the accession stripped off. only a key
+# picking out exactly one of each is taken, because a protein assayed at two domains
+# would otherwise be joined to whichever of them happened to sort first
+
+
+def without_accession(name):
+    return re.sub(r'_PF\d+$', '', re.sub(r'_(substitutions|indels)$', '', name))
+
+
+spare_archives, spare_rows = {}, {}
+for stem in extra:
+    spare_archives.setdefault(without_accession(stem), []).append(stem)
+for name in missing:
+    spare_rows.setdefault(without_accession(name), []).append(name)
+
+renamed = [(names[0], spare_archives[key][0]) for key, names in spare_rows.items()
+           if len(names) == 1 and len(spare_archives.get(key, [])) == 1]
+
+print(f"\nmanifest rows matched on the name without its accession: {len(renamed)}")
+for name, stem in renamed:
+    print(f"  manifest {name}  ->  archive {stem}")
+if renamed:
+    # the archive is reached under its own stem, carrying the manifest row's accession,
+    # since that is the one the clustering and the splits were built from
+    aliases = lookup.loc[[name for name, _ in renamed]].copy()
+    aliases.index = [stem for _, stem in renamed]
+    lookup = pd.concat([lookup, aliases])
+    matched = sorted(set(matched) | {stem for _, stem in renamed})
+    missing = sorted(set(missing) - {name for name, _ in renamed})
+    print(f"manifest rows still with no archive: {len(missing)}")
+
 print()
 print("inner contents of the first matching archive:")
 probe = stems[matched[0]] if matched else archives[0]
