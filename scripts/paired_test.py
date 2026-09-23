@@ -90,16 +90,18 @@ for ax, target in zip(axes, targets):
             positions.append(x)
             labels.append(model.upper() if model != 'ridge' else 'Ridge')
     ax.set_xticks(positions)
-    ax.set_xticklabels(labels, fontsize = 9)
+    ax.set_xticklabels(labels, fontsize = 9.5)
+    # the study name sits below the model ticks, not on top of the middle one
     for index, paper in enumerate(papers):
-        ax.annotate(paper.capitalize(), xy = (index, -0.02), xycoords = ('data', 'axes fraction'),
-                    ha = 'center', va = 'top', fontsize = 11)
+        ax.annotate(paper.capitalize(), xy = (index, -0.115), xycoords = ('data', 'axes fraction'),
+                    ha = 'center', va = 'top', fontsize = 11.5)
+    ax.set_xlim(-0.45, len(papers) - 1 + 0.45)
     ax.set_title('raw DMS score' if target == 'raw' else 'z-scored within dataset', loc = 'left')
-axes[0].set_ylabel(f"Spearman $\\rho$ difference\n({challenger} minus {baseline}, per replicate)")
-fig.suptitle(f"{family}: paired difference between encodings, same split in every pair\n"
-             f"above zero means one-hot wins that replicate",
+axes[0].set_ylabel("Spearman $\\rho$ difference per replicate")
+fig.suptitle(f"{family}: one-hot minus ESM2-150M, paired on the same split\n"
+             f"above the line means one-hot won that replicate",
              fontsize = 12.5, x = 0.02, ha = 'left')
-plt.tight_layout(rect = [0, 0.04, 1, 0.91])
+plt.tight_layout(rect = [0, 0.05, 1, 0.91])
 path = f"{figure_dir}/paired_test_{family}.png"
 plt.savefig(path)
 plt.close()
