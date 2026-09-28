@@ -4,6 +4,7 @@ import pandas as pd
 from scipy.stats import spearmanr
 from sklearn.preprocessing import OneHotEncoder as onehot
 from sklearn.linear_model import Ridge
+from encoding import to_alignment_columns
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -58,19 +59,6 @@ def read_alignment(path):
         row = ''.join(chunks)
         aligned[row.replace('-', '')] = row
     return aligned
-
-
-def to_alignment_columns(sequences, wt_sequence, aligned_wt):
-    columns = [i for i, c in enumerate(aligned_wt) if c != '-']
-    block = np.full((len(sequences), len(aligned_wt)), '-', dtype='<U1')
-    placed = np.zeros(len(sequences), dtype=bool)
-    for row, sequence in enumerate(sequences):
-        if len(sequence) != len(wt_sequence):
-            continue
-        for position, column in enumerate(columns):
-            block[row, column] = sequence[position]
-        placed[row] = True
-    return block, placed
 
 
 variants = pd.read_parquet(variants_path)
