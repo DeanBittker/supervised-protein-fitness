@@ -5,6 +5,8 @@ import pandas as pd
 import torch
 import esm
 
+from encoding import esm_models, filter_rows
+
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
 # outputs go to the repo by default; on O2 set SPF_OUTPUT to the shared project
@@ -13,16 +15,21 @@ output_root = os.environ.get("SPF_OUTPUT", project_dir)
 variants_path = f"{output_root}/results/variants.parquet"
 embedding_dir = f"{output_root}/embeddings"
 family = os.environ.get("SPF_FAMILY", "PF00018")
-encoding_name = "ESM2-150M"
-cache_tag = "esm150M"
-esm_layer = 30
-esm_batch_size = int(os.environ.get("SPF_BATCH", "16"))
-drop_insertions = True
+encoding_name = os.environ.get("SPF_ESM", "ESM2-150M")
+if encoding_name not in esm_models:
+    raise SystemExit(f"unknown model {encoding_name!r}, expected one of {sorted(esm_models)}")
+model_name, esm_layer, cache_tag, default_batch = esm_models[encoding_name]
+# the larger models need a smaller batch to fit on one card, so the default follows
+# the model and SPF_BATCH still overrides it
+esm_batch_size = int(os.environ.get("SPF_BATCH", str(default_batch)))
+row_filter = os.environ.get("SPF_ROWS", "drop_insertions")
 
 os.makedirs(embedding_dir, exist_ok = True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
+print(f"model {encoding_name} ({model_name}), layer {esm_layer}, batch {esm_batch_size}")
+print(f"cache tag {cache_tag}, rows {row_filter}")
 
 
 def cache_matches(path, expected_rows):
@@ -54,13 +61,9 @@ def esm_encode_batch(sequences, batch_size=esm_batch_size):
 
 variants = pd.read_parquet(variants_path)
 variants = variants[variants['pfam_acc'] == family].copy()
-if drop_insertions:
-    # one-hot, z-scales and blosum all need a fixed length, and an insertion makes
-    # the sequence longer than wild type. dropped here so every encoding sees the
-    # same rows and the comparison between them is not confounded.
-    before = len(variants)
-    variants = variants[~variants['has_insertion']]
-    print(f"dropped {before - len(variants):,} insertion rows, {len(variants):,} remain")
+# the row set has to match whatever this embedding will be compared against, so it
+# is named rather than assumed
+variants = filter_rows(variants, row_filter)
 
 datasets = sorted(variants['dataset'].unique())
 pending = [d for d in datasets
@@ -71,7 +74,7 @@ if not pending:
     print("nothing to do")
     raise SystemExit(0)
 
-esm_model, alphabet = esm.pretrained.esm2_t30_150M_UR50D()
+esm_model, alphabet = getattr(esm.pretrained, model_name)()
 batch_converter = alphabet.get_batch_converter()
 esm_model = esm_model.to(device)
 esm_model.eval()

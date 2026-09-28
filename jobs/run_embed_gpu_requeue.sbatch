@@ -17,7 +17,7 @@
 # fair-esm downloads weights on first use, and compute nodes may have no network.
 # Warm the cache once on a login node before submitting:
 #   source .venv/bin/activate
-#   python3 -c "import esm; esm.pretrained.esm2_t30_150M_UR50D()"
+#   python3 -c "import esm; esm.pretrained.esm2_t33_650M_UR50D()"
 
 set -o pipefail
 mkdir -p logs
@@ -28,10 +28,17 @@ source .venv/bin/activate
 
 export SPF_OUTPUT=${SPF_OUTPUT:-/n/groups/marks/projects/ProteinGym_supervised/260918_domain_clustering}
 export SPF_FAMILY=${SPF_FAMILY:-PF00018}
+# SPF_ESM picks the model: ESM2-8M, ESM2-35M, ESM2-150M or ESM2-650M. each writes its
+# own cache tag, so the smaller ones are never clobbered by the larger. kermut's
+# sequence kernel is mean-pooled 650M, which is why that one is wanted here.
+# SPF_ROWS picks the row set: drop_insertions (default), drop_indels, drop_deletions
+export SPF_ESM=${SPF_ESM:-ESM2-150M}
+export SPF_ROWS=${SPF_ROWS:-drop_insertions}
 export TORCH_HOME=${TORCH_HOME:-$SPF_OUTPUT/torch_cache}
 
 echo "host: $(hostname)  gpu: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo none)"
-echo "family: $SPF_FAMILY   output: $SPF_OUTPUT"
+echo "family: $SPF_FAMILY   model: $SPF_ESM   rows: $SPF_ROWS"
+echo "output: $SPF_OUTPUT"
 echo "started: $(date)"
 python3 scripts/embed_esm.py
 echo "finished: $(date)"

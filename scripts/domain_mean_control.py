@@ -4,7 +4,7 @@ import pandas as pd
 from scipy.stats import spearmanr
 from sklearn.preprocessing import OneHotEncoder as onehot
 from sklearn.linear_model import Ridge
-from encoding import to_alignment_columns
+from encoding import to_alignment_columns, esm_models, filter_rows
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -19,9 +19,11 @@ variants_path = f"{results_dir}/variants.parquet"
 family = os.environ.get("SPF_FAMILY", "PF00018")
 threshold = float(os.environ.get("SPF_THRESHOLD", "0.6"))
 n_replicates = int(os.environ.get("SPF_REPLICATES", "10"))
-cache_tag = "esm150M"
+esm_name = os.environ.get("SPF_ESM", "ESM2-150M")
+cache_tag = esm_models[esm_name][2]
+row_filter = os.environ.get("SPF_ROWS", "drop_insertions")
 papers = ['lehner', 'rocklin']
-encodings = ['onehot', 'ESM2-150M']
+encodings = ['onehot', esm_name]
 target_column = 'score_raw'
 
 os.makedirs(figure_dir, exist_ok = True)
@@ -34,7 +36,7 @@ slide = os.environ.get("SPF_SLIDE", "") == "1"
 scale = 1.4 if slide else 1.0
 blue, vermillion = "#0072B2", "#D55E00"
 ink, muted = "#1a1a1a", "#6b6b6b"
-colour = {'onehot': blue, 'ESM2-150M': vermillion}
+colour = {'onehot': blue, esm_name: vermillion}
 plt.rcParams.update({
     "figure.dpi": 150, "savefig.dpi": 200, "font.size": 11 * scale,
     "axes.edgecolor": muted, "axes.labelcolor": ink, "text.color": ink,
@@ -63,7 +65,7 @@ def read_alignment(path):
 
 variants = pd.read_parquet(variants_path)
 variants = variants[variants['pfam_acc'] == family]
-variants = variants[~variants['has_insertion']].sort_values(['dataset']).reset_index(drop = True)
+variants = filter_rows(variants, row_filter).sort_values(['dataset']).reset_index(drop = True)
 grouped = variants.groupby('dataset')['DMS_score']
 variants['score_raw'] = variants['DMS_score']
 variants['domain_mean'] = grouped.transform('mean')

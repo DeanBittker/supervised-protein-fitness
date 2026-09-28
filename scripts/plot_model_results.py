@@ -5,6 +5,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from encoding import esm_models, result_stem
+
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
 output_root = os.environ.get("SPF_OUTPUT", project_dir)
@@ -15,7 +17,10 @@ metric = os.environ.get("SPF_METRIC", "test_spearman_per_protein")
 papers = ['lehner', 'rocklin']
 targets = ['raw', 'zscore']
 models = ['ridge', 'rf', 'xgb']
-encodings = ['onehot', 'ESM2-150M']
+split_mode = os.environ.get("SPF_SPLIT_MODE", "replicate")
+row_filter = os.environ.get("SPF_ROWS", "drop_insertions")
+esm_name = os.environ.get("SPF_ESM", "ESM2-150M")
+encodings = ['onehot', esm_name]
 
 os.makedirs(figure_dir, exist_ok = True)
 
@@ -24,7 +29,7 @@ scale = 1.4 if slide else 1.0
 # okabe-ito pair, checked for colourblind separation against a light surface
 blue, vermillion = "#0072B2", "#D55E00"
 ink, muted = "#1a1a1a", "#6b6b6b"
-colour = {'onehot': blue, 'ESM2-150M': vermillion}
+colour = {'onehot': blue, esm_name: vermillion}
 paper_label = {'lehner': 'Lehner 2025  (human)', 'rocklin': 'Rocklin 2023  (across nature)'}
 target_label = {'raw': 'raw DMS score', 'zscore': 'z-scored within dataset'}
 metric_label = {'test_spearman_per_protein': "Spearman $\\rho$, averaged within protein",
@@ -39,8 +44,7 @@ plt.rcParams.update({
     "legend.frameon": False, "grid.color": "#e4e4e2", "grid.linewidth": 0.8,
 })
 
-split_mode = os.environ.get("SPF_SPLIT_MODE", "replicate")
-stem = f"loco_results_{family}" if split_mode == 'loco' else f"model_results_{family}"
+stem = result_stem(family, split_mode, row_filter, esm_name)
 results = pd.read_csv(f"{results_dir}/{stem}.csv")
 fold_column = 'fold' if split_mode == 'loco' else 'replicate'
 print(f"{len(results)} cells, {results[fold_column].nunique()} {fold_column}s")

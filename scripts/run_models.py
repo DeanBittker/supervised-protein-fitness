@@ -7,7 +7,7 @@ from sklearn.preprocessing import OneHotEncoder as onehot
 from sklearn.linear_model import Ridge
 from sklearn.ensemble import RandomForestRegressor
 import xgboost as xgb
-from encoding import to_alignment_columns
+from encoding import to_alignment_columns, esm_models, filter_rows, result_stem
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
@@ -25,12 +25,17 @@ n_replicates = int(os.environ.get("SPF_REPLICATES", "10"))
 # never reach most domains, because a large cluster cannot fit inside a tenth
 split_mode = os.environ.get("SPF_SPLIT_MODE", "replicate")
 n_jobs = int(os.environ.get("SLURM_CPUS_PER_TASK", "4"))
-cache_tag = "esm150M"
+esm_name = os.environ.get("SPF_ESM", "ESM2-150M")
+if esm_name not in esm_models:
+    raise SystemExit(f"unknown model {esm_name!r}, expected one of {sorted(esm_models)}")
+cache_tag = esm_models[esm_name][2]
+# kermut and anything else indexed by site needs both kinds of indel gone, so the row
+# set is named here and recorded with the results rather than assumed
+row_filter = os.environ.get("SPF_ROWS", "drop_insertions")
 papers = ['lehner', 'rocklin']
-encodings = ['onehot', 'ESM2-150M']
+encodings = ['onehot', esm_name]
 models = ['ridge', 'rf', 'xgb']
 targets = ['raw', 'zscore']
-drop_insertions = True
 dry_run = os.environ.get("SPF_DRYRUN", "") == "1"
 
 os.makedirs(results_dir, exist_ok = True)
@@ -83,8 +88,7 @@ def build_model(name):
 
 variants = pd.read_parquet(variants_path)
 variants = variants[variants['pfam_acc'] == family].copy()
-if drop_insertions:
-    variants = variants[~variants['has_insertion']]
+variants = filter_rows(variants, row_filter)
 variants = variants.sort_values(['dataset']).reset_index(drop = True)
 
 # the z-scored target is standardised within each dataset, so a model is never
@@ -95,9 +99,9 @@ variants['score_zscore'] = (variants['DMS_score'] - grouped.transform('mean')) /
 
 constructs = pd.read_csv(f"{results_dir}/constructs.csv")
 if split_mode == 'loco':
-    fold_column, result_name = 'fold', f"loco_results_{family}.csv"
+    fold_column = 'fold'
 else:
-    fold_column, result_name = 'replicate', f"model_results_{family}.csv"
+    fold_column = 'replicate'
 splits = pd.read_csv(f"{results_dir}/{'loco' if split_mode == 'loco' else 'splits'}_{family}.csv")
 splits = splits[np.isclose(splits['threshold'], threshold)]
 
@@ -127,7 +131,7 @@ if stale:
 if missing:
     print(f"WARNING: {len(missing)} datasets have no usable embedding, ESM2-150M cells will be skipped")
 
-cache_path = f"{results_dir}/{result_name}"
+cache_path = f"{results_dir}/{result_stem(family, split_mode, row_filter, esm_name)}.csv"
 done = set()
 if os.path.exists(cache_path):
     previous = pd.read_csv(cache_path)
@@ -255,6 +259,7 @@ for paper in papers:
                     rows.append({
                         'paper': paper, 'encoding': encoding, 'model': model_name,
                         'target': target, fold_column: fold,
+                        'row_filter': row_filter,
                         'n_train': int(keep_train.sum()), 'n_test': int(keep_test.sum()),
                         'n_train_domains': int(assignment[assignment['split'] == 'train'].shape[0]),
                         'n_test_domains': int(assignment[assignment['split'] == 'test'].shape[0]),
