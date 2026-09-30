@@ -82,6 +82,18 @@ variants['score_zscore'] = (variants['DMS_score'] - grouped.transform('mean')) /
 constructs = pd.read_csv(f"{results_dir}/constructs.csv")
 wt_of = dict(zip(constructs['construct'], constructs['wt_sequence']))
 
+# clustering and the alignments are built locally, because biotite will not install
+# against the python on O2. they are small, so they are copied up rather than rebuilt,
+# and saying so here saves working out what a missing file means
+for needed in [f"{results_dir}/domain_clusters.csv", f"{results_dir}/msa/pooled_{family}.fasta"]:
+    if not os.path.exists(needed):
+        raise SystemExit(
+            f"missing {needed}\n"
+            f"  it is built locally, not on the cluster, and results/ is not in git.\n"
+            f"  copy it up from the repo on your laptop:\n"
+            f"    rsync -avh results/domain_clusters.csv results/msa/ "
+            f"<user>@transfer.rc.hms.harvard.edu:{results_dir}/")
+
 clusters = pd.read_csv(f"{results_dir}/domain_clusters.csv")
 clusters = clusters[(clusters['pfam_acc'] == family) & (clusters['scope'] == 'pooled')]
 cluster_column = f"cluster_{threshold}"
