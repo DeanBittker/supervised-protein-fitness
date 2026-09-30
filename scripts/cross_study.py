@@ -24,7 +24,10 @@ esm_name = os.environ.get("SPF_ESM", "ESM2-150M")
 cache_tag = esm_models[esm_name][2]
 row_filter = os.environ.get("SPF_ROWS", "drop_insertions")
 n_jobs = int(os.environ.get("SLURM_CPUS_PER_TASK", "4"))
-models = ['ridge', 'rf', 'xgb']
+# ridge alone answers the question in minutes; random forest over ESM embeddings is
+# tens of thousands of variants against hundreds of dimensions and dominates the runtime
+# while losing to ridge in every cell so far. SPF_MODELS=ridge to get the answer first
+models = os.environ.get("SPF_MODELS", "ridge,rf,xgb").split(',')
 targets = ['raw', 'zscore']
 encodings = ['onehot', esm_name]
 directions = [('rocklin', 'lehner'), ('lehner', 'rocklin')]
@@ -109,6 +112,7 @@ cluster_of_wt = dict(zip(clusters['wt_sequence'], clusters[cluster_column]))
 
 alignment = read_alignment(f"{results_dir}/msa/pooled_{family}.fasta")
 width = len(next(iter(alignment.values())))
+print(f"models: {', '.join(models)}")
 print(f"{family}: {len(clusters)} domains, {clusters[cluster_column].nunique()} clusters "
       f"at {threshold}%, {len(shared)} shared across studies")
 
