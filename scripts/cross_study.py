@@ -211,6 +211,10 @@ for train_paper, test_paper in directions:
                             'spearman': spearmanr(group['truth'], group['prediction'])[0],
                         })
                 rows.extend(per_domain)
+                # written after every cell rather than at the end: this run is hours
+                # long and a dropped connection or a timeout should not cost all of it
+                pd.DataFrame(rows).to_csv(f"{results_dir}/cross_study_{family}.csv",
+                                          index = False)
                 values = [r['spearman'] for r in per_domain]
                 print(f"  {encoding:10s} {model_name:5s} {target:6s} "
                       f"median rho {np.median(values):6.3f} over {len(values)} datasets"
@@ -221,7 +225,6 @@ report = pd.DataFrame(rows)
 if report.empty:
     raise SystemExit("nothing scored")
 path = f"{results_dir}/cross_study_{family}.csv"
-report.to_csv(path, index = False)
 
 print("\n" + "=" * 90)
 print("CAN ONE STUDY'S DOMAINS PREDICT THE OTHER'S?")
