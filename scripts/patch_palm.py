@@ -11,7 +11,25 @@ import sys
 #   python3 scripts/patch_palm.py ~/PALM
 
 palm_root = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/PALM")
-target = f"{palm_root}/src/model/predictors.py"
+targets = {
+    'predictors': f"{palm_root}/src/model/predictors.py",
+    'scalers': f"{palm_root}/src/model/scalers.py",
+}
+
+scaler_patches = [
+    (
+        "clip the scaled target into the range the loss accepts",
+        """        _scaler = self.scaler_map[self.config_scaler_name]()""",
+        """        # a scaler fitted on train and applied to validation can push a value
+        # outside the range it learned: a variant more extreme than anything in
+        # training scales below zero. BCE asserts its target lies in [0, 1], and on
+        # a GPU that surfaces as an asynchronous device-side assert during the first
+        # validation pass, pointing at teardown rather than at the loss
+        _scaler = (MinMaxScaler(clip=True)
+                   if self.config_scaler_name == "MinMaxScaler"
+                   else self.scaler_map[self.config_scaler_name]())""",
+    ),
+]
 
 patches = [
     (
@@ -60,26 +78,28 @@ patches = [
     ),
 ]
 
-if not os.path.exists(target):
-    raise SystemExit(f"could not find {target} - pass the PALM checkout as the first argument")
-
-source = open(target).read()
 applied, already = [], []
-for label, old, new in patches:
-    if new in source:
-        already.append(label)
-    elif old in source:
-        source = source.replace(old, new, 1)
-        applied.append(label)
-    else:
-        raise SystemExit(f"could not apply {label!r}: PALM has changed, patch by hand")
-
-if applied:
-    backup = target + ".orig"
-    if not os.path.exists(backup):
-        open(backup, 'w').write(open(target).read())
-        print(f"kept the original at {backup}")
-    open(target, 'w').write(source)
+for key, patch_set in [('predictors', patches), ('scalers', scaler_patches)]:
+    target = targets[key]
+    if not os.path.exists(target):
+        raise SystemExit(f"could not find {target} - pass the PALM checkout as the first argument")
+    source = open(target).read()
+    changed = False
+    for label, old, new in patch_set:
+        if new in source:
+            already.append(label)
+        elif old in source:
+            source = source.replace(old, new, 1)
+            applied.append(label)
+            changed = True
+        else:
+            raise SystemExit(f"could not apply {label!r}: PALM has changed, patch by hand")
+    if changed:
+        backup = target + ".orig"
+        if not os.path.exists(backup):
+            open(backup, 'w').write(open(target).read())
+            print(f"kept the original at {backup}")
+        open(target, 'w').write(source)
 
 for label in applied:
     print(f"  applied  {label}")
