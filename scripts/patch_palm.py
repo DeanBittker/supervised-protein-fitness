@@ -18,6 +18,20 @@ targets = {
 
 scaler_patches = [
     (
+        "keep the scaler filename inside the filesystem limit",
+        """        if pred_model_name := self.cfg.predictor.model_name:
+            return Path(f"{pred_model_name}_{self.name}.skops")""",
+        """        if pred_model_name := self.cfg.predictor.model_name:
+            # the model name is every hyperparameter joined together, which on a model
+            # with this many of them runs past the 255 bytes a filename is allowed. the
+            # readable part is kept and a digest of the whole preserves uniqueness
+            if len(pred_model_name) > 120:
+                import hashlib
+                digest = hashlib.sha1(pred_model_name.encode()).hexdigest()[:10]
+                pred_model_name = f"{pred_model_name[:120]}_{digest}"
+            return Path(f"{pred_model_name}_{self.name}.skops")""",
+    ),
+    (
         "clip the scaled target into the range the loss accepts",
         """        _scaler = self.scaler_map[self.config_scaler_name]()""",
         """        # a scaler fitted on train and applied to validation can push a value
