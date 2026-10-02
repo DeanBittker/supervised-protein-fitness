@@ -30,6 +30,11 @@ SPF_PAPER=${SPF_PAPER:-lehner}
 SPF_FOLD=${SPF_FOLD:-replicate0}
 SPF_EMBEDDER=${SPF_EMBEDDER:-esm2_t6_8M}
 SPF_KERNEL=${SPF_KERNEL:-5}
+# PALM's defaults were set for short peptide sets. Against tens of thousands of variants
+# a batch of 5000 is about six optimiser steps an epoch, so the network hardly moves.
+# SPF_EXTRA passes any further hydra overrides straight through, e.g.
+#   SPF_EXTRA="predictor.hparams.batch_size=256 predictor.hparams.optimizer_type=adam"
+SPF_EXTRA=${SPF_EXTRA:-}
 
 module load conda/miniforge3/24.11.3-0 2>/dev/null || true
 source "$(conda info --base)/etc/profile.d/conda.sh"
@@ -41,6 +46,7 @@ export MLFLOW_ALLOW_FILE_STORE=true
 
 echo "host: $(hostname)"
 echo "data: ${SPF_FAMILY}_${SPF_PAPER}_${SPF_FOLD}   embedder: $SPF_EMBEDDER   kernel: $SPF_KERNEL"
+echo "extra: ${SPF_EXTRA:-none}"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo "no gpu visible"
 echo "started: $(date)"
 
@@ -57,6 +63,7 @@ python src/cli/training.py \
   predictor.model_type=regression \
   predictor.hparams.kernel_size="$SPF_KERNEL" \
   embedder="$SPF_EMBEDDER" \
-  embedder.mean_pool=false
+  embedder.mean_pool=false \
+  $SPF_EXTRA
 
 echo "finished: $(date)"
