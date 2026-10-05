@@ -1,5 +1,6 @@
 import os
 import glob
+import time
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -56,6 +57,18 @@ if not runs:
                      f"  set PALM_MLRUNS if the PALM checkout is elsewhere")
 
 run_dir = runs[-1]
+label = os.environ.get("PALM_LABEL", "")
+suffix = f"_{label}" if label else ""
+print(f"run {os.path.basename(run_dir)}"
+      f"{'  (chosen as the most recent, PALM_RUN pins one)' if not run_id else ''}")
+# picking the newest directory is wrong whenever a second job is still writing, and
+# the numbers then belong to a run that has not finished. say so rather than let the
+# curves be read against the wrong job
+age = time.time() - max(os.path.getmtime(p) for p in glob.glob(f"{run_dir}/metrics/*"))
+if not run_id and age < 180:
+    others = [os.path.basename(r) for r in runs[-4:-1]]
+    print(f"  WARNING: written to {age:.0f}s ago, so a job may still be running and this")
+    print(f"  may not be the one you meant. pin it with PALM_RUN. others: {', '.join(others)}")
 train = read_metric(run_dir, 'train.loss')
 val = read_metric(run_dir, 'val.loss')
 if val is None:
@@ -77,7 +90,6 @@ best_row = curves['val.loss'].idxmin()
 best_step = int(curves.loc[best_row, 'step'])
 best_val = float(curves.loc[best_row, 'val.loss'])
 
-print(f"run {os.path.basename(run_dir)}")
 print(f"epochs recorded      {n_epochs}")
 print(f"best validation loss {best_val:.5f} at record {best_row} of {n_epochs}"
       f" (optimiser step {best_step})")
@@ -188,8 +200,8 @@ fig.suptitle(f"PALM training: lowest validation loss {best_val:.4f} at optimiser
              f"\ndashed line is the checkpoint reloaded for testing",
              fontsize = 12.5 * scale, x = 0.02, ha = 'left')
 plt.tight_layout(rect = [0, 0, 1, 0.88])
-path = f"{figure_dir}/palm_loss_curves.png"
+path = f"{figure_dir}/palm_loss_curves{suffix}.png"
 plt.savefig(path)
 plt.close()
-curves.to_csv(f"{output_root}/results/palm_loss_curves.csv", index = False)
+curves.to_csv(f"{output_root}/results/palm_loss_curves{suffix}.csv", index = False)
 print(f"\nsaved {path}")
