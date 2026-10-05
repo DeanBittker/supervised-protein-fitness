@@ -57,14 +57,24 @@ if val is None:
 
 curves = val if train is None else train.merge(val, on = 'step', how = 'outer').sort_values('step')
 curves = curves.reset_index(drop = True)
+# train and validation are written at different points in the run, so the merge leaves
+# a gap in whichever column was not written at that step. carrying the last value
+# forward keeps both lines continuous instead of drawing them through the holes
+for column in ['train.loss', 'val.loss']:
+    if column in curves:
+        curves[column] = curves[column].ffill()
+curves = curves[curves['val.loss'].notna()].reset_index(drop = True)
 n_epochs = len(curves)
 best_row = curves['val.loss'].idxmin()
+# the step mlflow records is the global optimiser step, which is the epoch number
+# multiplied by the batches in an epoch. the position in the record is the epoch
 best_step = int(curves.loc[best_row, 'step'])
 best_val = float(curves.loc[best_row, 'val.loss'])
 
 print(f"run {os.path.basename(run_dir)}")
 print(f"epochs recorded      {n_epochs}")
-print(f"best validation loss {best_val:.5f} at epoch {best_step}")
+print(f"best validation loss {best_val:.5f} at record {best_row} of {n_epochs}"
+      f" (optimiser step {best_step})")
 
 # is the chosen epoch a real minimum, or did it land somewhere arbitrary?
 drop = float(curves['val.loss'].iloc[0] - best_val)
@@ -76,6 +86,19 @@ print(f"mean change between epochs {noise:.5f}"
       f"  ({noise / drop:.1%} of the total improvement)" if drop > 0 else "")
 
 verdicts = []
+# the clearest thing a pair of curves can say: training loss going down while
+# validation goes up means the model is fitting what it was given and losing ground
+# on what it was not. with whole domains held out, that is a statement about
+# generalising across domains rather than about the optimiser
+if 'train.loss' in curves and n_epochs > 10:
+    train_fall = float(curves['train.loss'].iloc[0] - curves['train.loss'].iloc[-1])
+    val_rise = float(curves['val.loss'].iloc[-1] - curves['val.loss'].iloc[0])
+    first_train = float(curves['train.loss'].iloc[0])
+    if train_fall > 0.01 * first_train and val_rise > 0:
+        verdicts.append(f"training loss fell {train_fall:.4f} while validation rose "
+                        f"{val_rise:.4f}: the model is fitting the domains it was trained "
+                        f"on and getting worse on the held-out ones, so this is about "
+                        f"generalising across domains rather than about the optimiser")
 if n_epochs < 10:
     verdicts.append("fewer than ten epochs ran, so there was no curve to choose from")
 if best_row <= 2 and n_epochs > 10:
@@ -119,7 +142,7 @@ plt.rcParams.update({
 
 fig, axes = plt.subplots(1, 2, figsize = (12 * scale, 4.6 * scale))
 for ax, window in zip(axes, [None, 'tail']):
-    frame = curves if window is None else curves.iloc[max(0, best_row - 40):best_row + 40]
+    frame = curves if window is None else curves.iloc[max(0, best_row - 20):best_row + 60]
     ax.grid(True, zorder = 0)
     ax.set_axisbelow(True)
     if 'train.loss' in frame:
@@ -128,13 +151,14 @@ for ax, window in zip(axes, [None, 'tail']):
     ax.plot(frame['step'], frame['val.loss'], color = vermillion, linewidth = 1.8,
             label = 'validation', zorder = 3)
     ax.axvline(best_step, color = ink, linestyle = '--', linewidth = 1.4, zorder = 4)
-    ax.set_xlabel('epoch')
+    ax.set_xlabel('optimiser step')
     ax.set_title('whole run' if window is None else 'around the selected epoch',
                  loc = 'left', fontsize = 10.5 * scale)
 axes[0].set_ylabel('loss')
 axes[0].legend(loc = 'upper right', fontsize = 10 * scale)
-fig.suptitle(f"PALM training: lowest validation loss {best_val:.4f} at epoch {best_step} "
-             f"of {n_epochs}\ndashed line is the epoch reloaded for testing",
+fig.suptitle(f"PALM training: lowest validation loss {best_val:.4f} at optimiser step "
+             f"{best_step}, record {best_row} of {n_epochs}"
+             f"\ndashed line is the checkpoint reloaded for testing",
              fontsize = 12.5 * scale, x = 0.02, ha = 'left')
 plt.tight_layout(rect = [0, 0, 1, 0.88])
 path = f"{figure_dir}/palm_loss_curves.png"
