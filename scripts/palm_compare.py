@@ -45,19 +45,28 @@ os.makedirs(figure_dir, exist_ok = True)
 
 
 def read_metric(run_dir, name):
+    """Read a metric as one value per epoch.
+
+    PALM logs each epoch twice, once against the epoch number and once against the
+    global optimiser step, so the file holds two interleaved series and is twice as
+    long as the run. Walking it in order and keeping the line whose step is the epoch
+    being waited for picks the epoch series out, whichever of the pair was written
+    first. Sorting on step instead splices the two together and invents a restart.
+    """
     path = f"{run_dir}/metrics/{name}"
     if not os.path.exists(path):
         return None
-    steps, values = [], []
+    epoch, values = 0, []
     for line in open(path):
         parts = line.split()
         if len(parts) < 3:
             continue
-        values.append(float(parts[1]))
-        steps.append(int(float(parts[2])))
+        if int(float(parts[2])) == epoch:
+            values.append(float(parts[1]))
+            epoch += 1
     if not values:
         return None
-    return pd.DataFrame({'step': steps, name: values}).groupby('step', as_index = False).last()
+    return pd.DataFrame({'epoch': range(len(values)), name: values})
 
 
 def load(run_id):
@@ -67,7 +76,7 @@ def load(run_id):
     train, val = read_metric(found[0], 'train.loss'), read_metric(found[0], 'val.loss')
     if val is None:
         raise SystemExit(f"{found[0]} has no val.loss")
-    frame = val if train is None else train.merge(val, on = 'step', how = 'outer').sort_values('step')
+    frame = val if train is None else train.merge(val, on = 'epoch', how = 'outer').sort_values('epoch')
     frame = frame.reset_index(drop = True)
     for column in ['train.loss', 'val.loss']:
         if column in frame:

@@ -30,22 +30,28 @@ os.makedirs(figure_dir, exist_ok = True)
 
 
 def read_metric(run_dir, name):
-    """mlflow's file store writes one line per point: timestamp, value, step."""
+    """Read a metric as one value per epoch.
+
+    PALM logs each epoch twice, once against the epoch number and once against the
+    global optimiser step, so the file holds two interleaved series and is twice as
+    long as the run. Walking it in order and keeping the line whose step is the epoch
+    being waited for picks the epoch series out, whichever of the pair was written
+    first. Sorting on step instead splices the two together and invents a restart.
+    """
     path = f"{run_dir}/metrics/{name}"
     if not os.path.exists(path):
         return None
-    steps, values = [], []
+    epoch, values = 0, []
     for line in open(path):
         parts = line.split()
         if len(parts) < 3:
             continue
-        values.append(float(parts[1]))
-        steps.append(int(float(parts[2])))
+        if int(float(parts[2])) == epoch:
+            values.append(float(parts[1]))
+            epoch += 1
     if not values:
         return None
-    frame = pd.DataFrame({'step': steps, name: values})
-    # lightning can log a metric more than once per epoch; the last write wins
-    return frame.groupby('step', as_index = False).last()
+    return pd.DataFrame({'epoch': range(len(values)), name: values})
 
 
 runs = sorted(glob.glob(f"{mlruns}/*/*/metrics"), key = os.path.getmtime)
@@ -77,7 +83,7 @@ val = read_metric(run_dir, 'val.loss')
 if val is None:
     raise SystemExit(f"{run_dir} has no val.loss: training never reached validation")
 
-curves = val if train is None else train.merge(val, on = 'step', how = 'outer').sort_values('step')
+curves = val if train is None else train.merge(val, on = 'epoch', how = 'outer').sort_values('epoch')
 curves = curves.reset_index(drop = True)
 # train and validation are written at different points in the run, so the merge leaves
 # a gap in whichever column was not written at that step. carrying the last value
@@ -90,7 +96,7 @@ n_epochs = len(curves)
 best_row = curves['val.loss'].idxmin()
 # the step mlflow records is the global optimiser step, which is the epoch number
 # multiplied by the batches in an epoch. the position in the record is the epoch
-best_step = int(curves.loc[best_row, 'step'])
+best_step = int(curves.loc[best_row, 'epoch'])
 best_val = float(curves.loc[best_row, 'val.loss'])
 
 print(f"epochs recorded      {n_epochs}")
@@ -188,9 +194,9 @@ for ax, window in zip(axes, [None, 'tail']):
     ax.grid(True, zorder = 0)
     ax.set_axisbelow(True)
     if 'train.loss' in frame:
-        ax.plot(frame['step'], frame['train.loss'], color = blue, linewidth = 1.8,
+        ax.plot(frame['epoch'], frame['train.loss'], color = blue, linewidth = 1.8,
                 label = 'train', zorder = 3)
-    ax.plot(frame['step'], frame['val.loss'], color = vermillion, linewidth = 1.8,
+    ax.plot(frame['epoch'], frame['val.loss'], color = vermillion, linewidth = 1.8,
             label = 'validation', zorder = 3)
     ax.axvline(best_step, color = ink, linestyle = '--', linewidth = 1.4, zorder = 4)
     ax.set_xlabel('optimiser step')
