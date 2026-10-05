@@ -107,6 +107,11 @@ for paper in papers:
     })
     unassigned = int(frame['data_split'].isna().sum())
     frame = frame[frame['data_split'].notna() & frame['value_real'].notna()]
+    # Rows arrive grouped by domain, so a loader that takes the file in order gets a
+    # batch holding one protein and a gradient that lurches between domains instead of
+    # averaging over them. Whether PALM shuffles is PALM's business; shuffling here
+    # means the question never arises, and the control is exported the same way.
+    frame = frame.sample(frac = 1, random_state = 67 + fold).reset_index(drop = True)
 
     path = f"{export_dir}/{family}_{paper}_{split_mode}{fold}.csv"
     frame.to_csv(path)
