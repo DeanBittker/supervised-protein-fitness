@@ -65,10 +65,13 @@ print(f"run {os.path.basename(run_dir)}"
 # the numbers then belong to a run that has not finished. say so rather than let the
 # curves be read against the wrong job
 age = time.time() - max(os.path.getmtime(p) for p in glob.glob(f"{run_dir}/metrics/*"))
-if not run_id and age < 180:
+if age < 180:
     others = [os.path.basename(r) for r in runs[-4:-1]]
-    print(f"  WARNING: written to {age:.0f}s ago, so a job may still be running and this")
-    print(f"  may not be the one you meant. pin it with PALM_RUN. others: {', '.join(others)}")
+    print(f"  WARNING: written to {age:.0f}s ago, so this run is probably still going and")
+    print(f"  these numbers are not final. check squeue before reading them.")
+    if not run_id:
+        print(f"  it was also chosen only for being newest; pin one with PALM_RUN. "
+              f"others: {', '.join(others)}")
 train = read_metric(run_dir, 'train.loss')
 val = read_metric(run_dir, 'val.loss')
 if val is None:
