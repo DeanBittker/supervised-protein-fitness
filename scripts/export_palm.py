@@ -98,6 +98,20 @@ for paper in papers:
     # PALM expects val where our splits say validate, and leave-one-cluster-out has no
     # validation fold at all, so part of train stands in for it
     membership = membership.replace({'validate': 'val'})
+    if split_mode == 'loco' and 'val' not in set(membership.dropna()):
+        # PALM picks its epoch on validation loss and will not run without one. Hold out
+        # whole training domains rather than rows, so the epoch is chosen on the same
+        # kind of generalisation the fold is testing; choosing it on variants of a
+        # protein the model already knows would select for the easier task.
+        pool = sorted(rows.loc[membership == 'train', 'dataset'].unique())
+        if len(pool) > 3:
+            generator = np.random.default_rng(67 + fold)
+            held = set(generator.choice(pool, max(2, round(0.1 * len(pool))),
+                                        replace = False))
+            membership = membership.mask(
+                (membership == 'train') & rows['dataset'].isin(held), 'val')
+            print(f"  {paper}: {len(held)} of {len(pool)} training domains held for "
+                  f"validation, leave-one-cluster-out has none of its own")
 
     frame = pd.DataFrame({
         'sequence': rows['mutated_sequence'].astype(str),
