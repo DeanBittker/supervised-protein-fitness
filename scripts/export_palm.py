@@ -40,28 +40,61 @@ variants['value_zscore'] = (variants['DMS_score'] - grouped.transform('mean')) /
 constructs = pd.read_csv(f"{results_dir}/constructs.csv")
 wt_of = dict(zip(constructs['construct'], constructs['wt_sequence']))
 
-if split_mode == 'loco':
-    splits = pd.read_csv(f"{results_dir}/loco_{family}.csv")
-    fold_column = 'fold'
+# "within" is the control for the other two: the same variants and the same model, but
+# split at random inside each protein instead of holding whole proteins out. A model
+# that cannot learn this one is not telling us anything about transfer across domains,
+# it is telling us the wiring is wrong
+if split_mode == 'within':
+    splits = None
 else:
-    splits = pd.read_csv(f"{results_dir}/splits_{family}.csv")
-    fold_column = 'replicate'
-splits = splits[np.isclose(splits['threshold'], threshold)]
-splits = splits[splits[fold_column] == fold]
+    if split_mode == 'loco':
+        splits = pd.read_csv(f"{results_dir}/loco_{family}.csv")
+        fold_column = 'fold'
+    else:
+        splits = pd.read_csv(f"{results_dir}/splits_{family}.csv")
+        fold_column = 'replicate'
+    splits = splits[np.isclose(splits['threshold'], threshold)]
+    splits = splits[splits[fold_column] == fold]
+
+
+def split_within(rows, seed):
+    """Assign each variant of a protein to train, validate or test at eight to one to one.
+
+    Drawn inside each dataset so every protein appears in all three, which is the whole
+    point of the control: nothing is held out that the model has not seen a relative of.
+    """
+    generator = np.random.default_rng(seed)
+    membership = pd.Series(index = rows.index, dtype = object)
+    for _, index in rows.groupby('dataset').groups.items():
+        order = generator.permutation(len(index))
+        cut_train = int(0.8 * len(index))
+        cut_val = int(0.9 * len(index))
+        labels = np.empty(len(index), dtype = object)
+        labels[order[:cut_train]] = 'train'
+        labels[order[cut_train:cut_val]] = 'val'
+        labels[order[cut_val:]] = 'test'
+        membership.loc[index] = labels
+    return membership
 
 print(f"family {family}, {split_mode} {fold}, target {target}, rows {row_filter}")
 for paper in papers:
     rows = variants[variants['paper'] == paper]
-    labels = splits[splits['scope'] == paper]
-    if rows.empty or labels.empty:
+    if rows.empty:
+        print(f"  {paper}: nothing to export")
+        continue
+    labels = None if splits is None else splits[splits['scope'] == paper]
+    if labels is not None and labels.empty:
         print(f"  {paper}: nothing to export")
         continue
 
-    # several constructs can share a wild-type sequence, so membership is routed
-    # through the sequence rather than the label, or those variants go unassigned
-    split_of_wt = {wt_of[row['label']]: row['split']
-                   for _, row in labels.iterrows() if row['label'] in wt_of}
-    membership = rows['construct'].map(wt_of).map(split_of_wt)
+    if labels is None:
+        membership = split_within(rows, seed = 67 + fold)
+    else:
+        # several constructs can share a wild-type sequence, so membership is routed
+        # through the sequence rather than the label, or those variants go unassigned
+        split_of_wt = {wt_of[row['label']]: row['split']
+                       for _, row in labels.iterrows() if row['label'] in wt_of}
+        membership = rows['construct'].map(wt_of).map(split_of_wt)
     # PALM expects val where our splits say validate, and leave-one-cluster-out has no
     # validation fold at all, so part of train stands in for it
     membership = membership.replace({'validate': 'val'})
