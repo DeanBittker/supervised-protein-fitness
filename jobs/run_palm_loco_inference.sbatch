@@ -38,20 +38,24 @@ export MLFLOW_ALLOW_FILE_STORE=true
 data_name="${SPF_FAMILY}_${SPF_PAPER}_loco${FOLD}"
 name="loco${FOLD}"
 
-# -x so loco1 does not match loco15. Newest first, in case a fold was run twice.
-param=$(ls -t $(grep -lx "$data_name" "$PALM_DIR"/mlruns/*/*/params/dataset.data_name 2>/dev/null) 2>/dev/null | head -1)
-if [ -z "$param" ]; then
-  echo "no mlflow run trained on $data_name" >&2
+# -x so loco1 does not match loco15. A fold run twice leaves two runs, and one of them
+# may be an interrupted attempt with no saved model, so take the newest run that
+# actually finished rather than the newest run.
+run_dir=""
+for param in $(ls -t $(grep -lx "$data_name" "$PALM_DIR"/mlruns/*/*/params/dataset.data_name 2>/dev/null) 2>/dev/null); do
+  candidate=$(dirname "$(dirname "$param")")
+  if [ -f "$candidate/artifacts/model_state_dict.pt" ]; then
+    run_dir="$candidate"
+    break
+  fi
+  echo "skipping $(basename "$candidate"): no model_state_dict.pt, it did not finish"
+done
+if [ -z "$run_dir" ]; then
+  echo "no finished mlflow run trained on $data_name" >&2
   exit 0
 fi
-run_dir=$(dirname "$(dirname "$param")")
 artifacts="$run_dir/artifacts"
 echo "fold $FOLD -> run $(basename "$run_dir")"
-
-if [ ! -f "$artifacts/model_state_dict.pt" ]; then
-  echo "run $(basename "$run_dir") has no model_state_dict.pt, it probably did not finish" >&2
-  exit 0
-fi
 
 fold_dir="$PALM_DIR/PALM_models/$name/fold0"
 mkdir -p "$fold_dir"
