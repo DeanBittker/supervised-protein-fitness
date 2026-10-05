@@ -23,6 +23,15 @@ row_labels_spec = os.environ.get("PALM_ROW_LABELS", "")
 # 1-based rows the entropy floor belongs on. It is a cross entropy floor, so it is wrong
 # on a squared error row; default is every row, which is what a single row run wants.
 floor_rows_spec = os.environ.get("PALM_FLOOR_ROWS", "")
+# "row" (the default) shares a y axis within each row, which is right when the rows
+# are different losses. "all" shares one across the figure, which is what a comparison
+# between encodings needs: there the question is where each run ends, not how far it
+# travelled. "none" gives every panel its own.
+sharey_spec = os.environ.get("PALM_SHAREY", "row")
+# the share of the available range is measured from each run's own first epoch, so it
+# flatters a run that started badly. Set PALM_SHOW_SHARE=0 when panels do not start
+# from the same place and the number would mislead.
+show_share = os.environ.get("PALM_SHOW_SHARE", "1") != "0"
 # suffix on the output names, so a second comparison does not overwrite the first
 label_suffix = os.environ.get("PALM_LABEL", "")
 title_override = os.environ.get("PALM_TITLE", "")
@@ -115,9 +124,12 @@ plt.rcParams.update({
 
 grid = [[(label, load(run_id)) for run_id, label in row] for row in rows]
 ncol = len(grid[0])
+sharey = {'row': 'row', 'all': True, 'none': False}.get(sharey_spec)
+if sharey is None:
+    raise SystemExit(f"PALM_SHAREY must be row, all or none, got {sharey_spec!r}")
 fig, axes = plt.subplots(len(grid), ncol, squeeze = False,
                          figsize = (6.2 * ncol * scale, 4.6 * len(grid) * scale),
-                         sharey = 'row')
+                         sharey = sharey)
 summary = []
 for row_index, row in enumerate(grid):
     row_floor = floor if (row_index + 1) in floor_rows else None
@@ -140,7 +152,7 @@ for row_index, row in enumerate(grid):
         captured = (drop / (first - row_floor)
                     if row_floor is not None and first > row_floor else np.nan)
         ax.set_title(f"{label}\n{captured:.0%} of the available range"
-                     if np.isfinite(captured) else label,
+                     if (show_share and np.isfinite(captured)) else label,
                      loc = 'left', fontsize = 11 * scale)
         if row_index == len(grid) - 1:
             ax.set_xlabel('epoch')
