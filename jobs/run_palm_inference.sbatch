@@ -84,6 +84,6 @@ python src/cli/inference.py \
 echo "finished: $(date)"
 echo
 echo "score it with:"
-echo "  PALM_PREDICTIONS=$PALM_DIR/predictions_${PALM_NAME}_${SPF_SPLIT}_sequences.csv \\"
+echo "  PALM_PREDICTIONS=$PALM_DIR/predictions_${PALM_NAME}_${SPF_SPLIT}__sequences.csv \\"
 echo "  PALM_TEST=$rows PALM_LABEL=${PALM_NAME}_${SPF_SPLIT} \\"
 echo "  python scripts/palm_test_spearman.py"
