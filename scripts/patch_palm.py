@@ -14,7 +14,24 @@ palm_root = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/PALM")
 targets = {
     'predictors': f"{palm_root}/src/model/predictors.py",
     'scalers': f"{palm_root}/src/model/scalers.py",
+    'light_attention': f"{palm_root}/src/helpers/pytorch/light_attention.py",
 }
+
+loss_patches = [
+    (
+        "let the loss be chosen at run time",
+        """        self.loss_fxn = nn.BCELoss()""",
+        """        # cross entropy against a soft target cannot fall below the entropy of
+        # the targets themselves, which for values squashed into [0, 1] sits near 0.65
+        # and leaves a few hundredths of range to read a curve in. Squared error has no
+        # such floor, so PALM_LOSS=mse makes the curves and any comparison legible. The
+        # head stays sigmoid bounded either way, which suits a target already in [0, 1]
+        import os as _os
+        self.loss_fxn = (nn.MSELoss()
+                         if _os.environ.get("PALM_LOSS", "bce").lower() == "mse"
+                         else nn.BCELoss())""",
+    ),
+]
 
 scaler_patches = [
     (
@@ -93,7 +110,8 @@ patches = [
 ]
 
 applied, already = [], []
-for key, patch_set in [('predictors', patches), ('scalers', scaler_patches)]:
+for key, patch_set in [('predictors', patches), ('scalers', scaler_patches),
+                       ('light_attention', loss_patches)]:
     target = targets[key]
     if not os.path.exists(target):
         raise SystemExit(f"could not find {target} - pass the PALM checkout as the first argument")

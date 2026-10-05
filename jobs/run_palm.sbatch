@@ -35,6 +35,9 @@ SPF_KERNEL=${SPF_KERNEL:-5}
 # SPF_EXTRA passes any further hydra overrides straight through, e.g.
 #   SPF_EXTRA="predictor.hparams.batch_size=256 predictor.hparams.optimizer_type=adam"
 SPF_EXTRA=${SPF_EXTRA:-}
+# bce or mse. Cross entropy against a soft target bottoms out at the entropy of the
+# targets, near 0.65 here, leaving a few hundredths of range to read a curve in
+export PALM_LOSS=${PALM_LOSS:-bce}
 
 module load conda/miniforge3/24.11.3-0 2>/dev/null || true
 source "$(conda info --base)/etc/profile.d/conda.sh"
@@ -46,7 +49,7 @@ export MLFLOW_ALLOW_FILE_STORE=true
 
 echo "host: $(hostname)"
 echo "data: ${SPF_FAMILY}_${SPF_PAPER}_${SPF_FOLD}   embedder: $SPF_EMBEDDER   kernel: $SPF_KERNEL"
-echo "extra: ${SPF_EXTRA:-none}"
+echo "extra: ${SPF_EXTRA:-none}   loss: $PALM_LOSS"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo "no gpu visible"
 echo "started: $(date)"
 
