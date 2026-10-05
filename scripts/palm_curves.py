@@ -12,6 +12,12 @@ output_root = os.environ.get("SPF_OUTPUT", project_dir)
 figure_dir = f"{output_root}/figures"
 mlruns = os.environ.get("PALM_MLRUNS", os.path.expanduser("~/PALM/mlruns"))
 run_id = os.environ.get("PALM_RUN", "")
+# binary cross entropy against a soft target cannot reach zero: its floor is the mean
+# binary entropy of the targets themselves. On targets squashed into [0, 1] that floor
+# sits near 0.65, so measuring progress against the starting loss makes a model that
+# captured half of everything available look like one that did nothing. Point this at
+# the exported csv and the improvement is reported against what was reachable
+targets_path = os.environ.get("PALM_TARGETS", "")
 
 os.makedirs(figure_dir, exist_ok = True)
 
@@ -85,6 +91,21 @@ print(f"spread within 10 epochs of the best {float(near.max() - near.min()):.5f}
 print(f"mean change between epochs {noise:.5f}"
       f"  ({noise / drop:.1%} of the total improvement)" if drop > 0 else "")
 
+first_val = float(curves['val.loss'].iloc[0])
+floor = None
+if targets_path and os.path.exists(targets_path):
+    target_values = pd.read_csv(targets_path)['value_real'].astype(float).values
+    target_values = (target_values - target_values.min()) / \
+                    (target_values.max() - target_values.min())
+    target_values = np.clip(target_values, 1e-7, 1 - 1e-7)
+    floor = float(np.mean(-(target_values * np.log(target_values) +
+                            (1 - target_values) * np.log(1 - target_values))))
+    headroom = first_val - floor
+    print(f"irreducible loss for these targets {floor:.5f}")
+    print(f"headroom that ever existed         {headroom:+.5f}")
+    if headroom > 0:
+        print(f"share of it captured               {drop / headroom:.0%}")
+
 verdicts = []
 # the clearest thing a pair of curves can say: training loss going down while
 # validation goes up means the model is fitting what it was given and losing ground
@@ -107,17 +128,23 @@ if best_row <= 2 and n_epochs > 10:
 if best_row >= n_epochs - 2 and n_epochs > 10:
     verdicts.append("the best epoch is the last one: it was still improving when training "
                     "ended, so raise max_epochs or patience")
-first_val = float(curves['val.loss'].iloc[0])
 if drop <= 0:
     verdicts.append("validation loss never fell below its starting value")
-if drop > 0 and first_val > 0 and drop < 0.05 * first_val:
-    # a clean curve can still be a curve that went nowhere. the selection being sound
-    # says nothing about whether there was anything worth selecting between
+if floor is not None and first_val - floor > 0:
+    captured = drop / (first_val - floor)
+    if captured < 0.15:
+        verdicts.append(f"validation loss moved {captured:.0%} of the way from where it "
+                        f"started to the floor these targets allow ({floor:.4f}), so the "
+                        f"model barely trained: check the spread of the predictions and "
+                        f"raise the optimiser steps per epoch by lowering the batch size")
+elif drop > 0 and first_val > 0 and drop < 0.05 * first_val:
+    # without the targets there is no floor to measure against, so this falls back to
+    # the starting loss, which understates progress on a loss that cannot reach zero
     verdicts.append(f"validation loss fell by only {drop / first_val:.1%} of where it "
-                    f"started ({first_val:.4f} to {best_val:.4f}), so the model barely "
-                    f"trained whatever the curve looks like: check the spread of the "
-                    f"predictions, and raise the number of optimiser steps per epoch "
-                    f"by lowering the batch size before reading anything into the test score")
+                    f"started ({first_val:.4f} to {best_val:.4f}). if the loss is cross "
+                    f"entropy against a soft target it cannot reach zero, so set "
+                    f"PALM_TARGETS to the exported csv and read this against the floor "
+                    f"rather than against the start")
 if drop > 0 and noise > 0.05 * drop:
     verdicts.append(f"epoch-to-epoch noise is {noise / drop:.0%} of the total improvement, so "
                     f"which epoch wins is close to arbitrary: look at the figure, and consider "
