@@ -87,7 +87,7 @@ if best_row >= n_epochs - 2 and n_epochs > 10:
 first_val = float(curves['val.loss'].iloc[0])
 if drop <= 0:
     verdicts.append("validation loss never fell below its starting value")
-elif first_val > 0 and drop < 0.05 * first_val:
+if drop > 0 and first_val > 0 and drop < 0.05 * first_val:
     # a clean curve can still be a curve that went nowhere. the selection being sound
     # says nothing about whether there was anything worth selecting between
     verdicts.append(f"validation loss fell by only {drop / first_val:.1%} of where it "
@@ -95,7 +95,7 @@ elif first_val > 0 and drop < 0.05 * first_val:
                     f"trained whatever the curve looks like: check the spread of the "
                     f"predictions, and raise the number of optimiser steps per epoch "
                     f"by lowering the batch size before reading anything into the test score")
-elif noise > 0.05 * drop:
+if drop > 0 and noise > 0.05 * drop:
     verdicts.append(f"epoch-to-epoch noise is {noise / drop:.0%} of the total improvement, so "
                     f"which epoch wins is close to arbitrary: look at the figure, and consider "
                     f"a lower learning rate or a larger batch before trusting the test number")
