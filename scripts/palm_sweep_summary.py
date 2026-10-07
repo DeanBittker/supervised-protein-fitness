@@ -59,11 +59,23 @@ for run_dir in sorted(glob.glob(f"{mlruns}/*/*")):
     kernel = read_param(run_dir, 'predictor.hparams.kernel_size', '?')
     config = f"dropout {dropout}, kernel {kernel}"
     rows.append({'fold': int(suffix), 'config': config, 'palm': score,
-                 'run': os.path.basename(run_dir)[:8]})
+                 'run': os.path.basename(run_dir)[:8],
+                 'written': os.path.getmtime(run_dir)})
 
 if not rows:
     raise SystemExit(f"no {prefix}* runs with test.spearman_r under {mlruns}")
 sweep = pd.DataFrame(rows)
+# the folds tried by hand before the arrays went out were run a second time by them, so
+# a fold and configuration can have more than one run. Keep the newest of each rather
+# than averaging, which would hide that the pair disagreed.
+sweep = sweep.sort_values('written')
+repeats = int(sweep.duplicated(subset = ['fold', 'config']).sum())
+if repeats:
+    spread = (sweep.groupby(['fold', 'config'])['palm']
+              .agg(lambda values: values.max() - values.min()))
+    print(f"{repeats} fold-configuration pairs ran more than once, keeping the newest; "
+          f"widest disagreement between repeats {spread.max():.3f}")
+sweep = sweep.drop_duplicates(subset = ['fold', 'config'], keep = 'last')
 
 # a fold is comparable only when it held exactly one domain out
 folds_path = f"{results_dir}/loco_{family}.csv"
