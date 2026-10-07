@@ -28,6 +28,11 @@ frame = pd.read_csv(path)
 if 'dataset' not in frame or 'ridge' not in frame:
     raise SystemExit(f"{path} needs a dataset and a ridge column, has {list(frame.columns)}")
 configs = [c for c in frame.columns if c.startswith('dropout')]
+# PALM's own defaults are batch 5000 with SGD, which is about six optimiser steps an
+# epoch here and was much worse. Every run in this sweep uses batch 256 with Adam, so
+# this series is the sweep's baseline rather than PALM as distributed, and the figure
+# says so instead of letting "default" stand for both.
+baseline = os.environ.get("SPF_BASELINE", "dropout 0.25, kernel 5")
 if not configs:
     raise SystemExit(f"no configuration columns in {path}: {list(frame.columns)}")
 
@@ -64,7 +69,8 @@ ax.hlines(rows, frame['palm_low'], frame['palm_high'], color = "#c9c9c4",
 for config in configs:
     ax.scatter(frame[config], rows, s = 34, color = colour[config], alpha = 0.9,
                edgecolor = 'none', zorder = 3,
-               label = f"PALM, {config}  ({frame[config].mean():+.3f})")
+               label = (f"PALM {'baseline, ' if config == baseline else ''}{config}"
+                        f"  ({frame[config].mean():+.3f})"))
 ax.scatter(frame['ridge'], rows, s = 72, color = blue, marker = 'D',
            edgecolor = 'none', zorder = 4,
            label = f"one-hot ridge  ({frame['ridge'].mean():+.3f})")
@@ -80,8 +86,8 @@ ax.legend(loc = 'upper left', fontsize = 9.5 * scale)
 best = frame[configs].max(axis = 1)
 beaten = int((frame['ridge'] > best).sum())
 fig.suptitle(f"{family} {paper}: ridge beats PALM on {beaten} of {len(frame)} "
-             f"held-out domains\nleave-one-cluster-out, and no configuration tried "
-             f"closes the gap",
+             f"held-out domains\nleave-one-cluster-out, every PALM configuration at "
+             f"batch 256 with Adam",
              fontsize = 12.5 * scale, x = 0.02, ha = 'left')
 plt.tight_layout(rect = [0, 0, 1, 0.94])
 out = f"{figure_dir}/palm_sweep_{family}_{paper}.png"
