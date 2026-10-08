@@ -33,7 +33,16 @@ cache_tag = esm_models[esm_name][2]
 # set is named here and recorded with the results rather than assumed
 row_filter = os.environ.get("SPF_ROWS", "drop_insertions")
 papers = ['lehner', 'rocklin']
-encodings = ['onehot', esm_name]
+# "onehot" alone skips the language model entirely, which is what a sweep over many
+# families wants: one-hot needs only the alignment, so a family can be run without
+# embedding tens of thousands of its sequences first.
+encodings = [name.strip() for name in
+             os.environ.get("SPF_ENCODINGS", f"onehot,{esm_name}").split(',')
+             if name.strip()]
+unknown = [name for name in encodings if name != 'onehot' and name not in esm_models]
+if unknown:
+    raise SystemExit(f"unknown encoding {unknown}, expected onehot or one of "
+                     f"{sorted(esm_models)}")
 models = ['ridge', 'rf', 'xgb']
 targets = ['raw', 'zscore']
 dry_run = os.environ.get("SPF_DRYRUN", "") == "1"
@@ -208,7 +217,7 @@ for paper in papers:
         continue
 
     for encoding in encodings:
-        if encoding == 'ESM2-150M' and any(d not in embeddings for d in paper_rows['dataset'].unique()):
+        if encoding != 'onehot' and any(d not in embeddings for d in paper_rows['dataset'].unique()):
             print(f"skipping {paper} / {encoding}: embeddings incomplete")
             continue
 
