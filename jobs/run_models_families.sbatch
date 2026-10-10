@@ -38,14 +38,28 @@ if [ -z "$SPF_FAMILY" ]; then
   exit 0
 fi
 
-module load conda/miniforge3/24.11.3-0 2>/dev/null || true
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate "${SPF_ENV:-$HOME/PALM/.conda_palm}"
+# the same environment run_models.sbatch uses, so these numbers sit beside the
+# PF00018 run rather than beside whatever a different environment resolves to. The
+# PALM environment has no xgboost, which is what killed the first attempt.
+module load gcc/9.2.0 2>/dev/null || true
+cd "$PROJECT_DIR"
+if [ -f .venv/bin/activate ]; then
+  source .venv/bin/activate
+else
+  echo "no .venv in $PROJECT_DIR, falling back to conda" >&2
+  module load conda/miniforge3/24.11.3-0 2>/dev/null || true
+  source "$(conda info --base)/etc/profile.d/conda.sh"
+  conda activate "${SPF_ENV:-$HOME/PALM/.conda_palm}"
+fi
+python -c "import xgboost" 2>/dev/null || {
+  echo "xgboost missing from this environment, ridge and rf would run but the" >&2
+  echo "comparison would be missing a model, so stopping instead" >&2
+  exit 1
+}
 
 echo "host: $(hostname)   family: $SPF_FAMILY   mode: $SPF_SPLIT_MODE   encodings: $SPF_ENCODINGS"
 echo "started: $(date)"
 
-cd "$PROJECT_DIR"
 for needed in "$SPF_OUTPUT/results/splits_${SPF_FAMILY}.csv" \
               "$SPF_OUTPUT/results/loco_${SPF_FAMILY}.csv"; do
   if [ ! -f "$needed" ]; then
