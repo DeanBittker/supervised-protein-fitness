@@ -22,16 +22,22 @@ encoding = os.environ.get("SPF_ENCODING", "onehot")
 metric = os.environ.get("SPF_METRIC", "test_spearman_per_protein")
 # a family scored on one or two held-out domains is a number, not an average
 min_folds = int(os.environ.get("SPF_MIN_FOLDS", "3"))
+# the same tag run_models.py wrote, so a tuned sweep is read on its own rather than
+# mixed with the default one
+tag = os.environ.get("SPF_TAG", "").strip()
+suffix = f"_{tag}" if tag else ""
+
 
 os.makedirs(figure_dir, exist_ok = True)
 
-paths = sorted(glob.glob(f"{results_dir}/loco_results_PF*.csv"))
+paths = sorted(glob.glob(f"{results_dir}/loco_results_PF*{suffix}.csv"))
 if not paths:
     raise SystemExit(f"no loco_results_PF*.csv under {results_dir}")
 
 rows = []
 for path in paths:
-    match = re.search(r"loco_results_(PF\d+)\.csv$", os.path.basename(path))
+    match = re.search(rf"loco_results_(PF\d+){re.escape(suffix)}\.csv$",
+                      os.path.basename(path))
     if not match:
         continue
     frame = pd.read_csv(path)
@@ -111,11 +117,11 @@ subtitle = (f"{encoding}, leave-one-cluster-out at 60% identity, "
 fig.suptitle(f"{paper}: how much of the PF00018 result is the method and how much is "
              f"the family\n{subtitle}", fontsize = 12.5 * scale, x = 0.02, ha = 'left')
 plt.tight_layout(rect = [0, 0, 1, 0.93])
-out = f"{figure_dir}/family_variance_{paper}_{encoding}.png"
+out = f"{figure_dir}/family_variance_{paper}_{encoding}{suffix}.png"
 plt.savefig(out)
 plt.close()
 
-table = f"{results_dir}/family_variance_{paper}_{encoding}.csv"
+table = f"{results_dir}/family_variance_{paper}_{encoding}{suffix}.csv"
 per_family.to_csv(table, index = False)
 print(f"\nsaved {out}")
 print(f"saved {table}")

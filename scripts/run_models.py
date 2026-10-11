@@ -86,13 +86,32 @@ def read_alignment(path):
     return aligned
 
 
+# At library defaults the two tree models are in opposite wrong regimes on this feature
+# set: random forest reaches 0.968 train Spearman against 0.379 test, and xgboost
+# manages 0.389 on train, below its own test score, because a hundred rounds at 0.1 is
+# nowhere near convergence over a thousand sparse alignment columns. Leaving them there
+# would make ridge's win a statement about defaults. These settings move with the
+# environment so a tuned run can be compared against the default one.
+ridge_alpha = float(os.environ.get("SPF_RIDGE_ALPHA", "1.0"))
+rf_estimators = int(os.environ.get("SPF_RF_ESTIMATORS", "100"))
+rf_min_leaf = int(os.environ.get("SPF_RF_MIN_LEAF", "1"))
+rf_max_features = os.environ.get("SPF_RF_MAX_FEATURES", "1.0")
+xgb_estimators = int(os.environ.get("SPF_XGB_ESTIMATORS", "100"))
+xgb_depth = int(os.environ.get("SPF_XGB_DEPTH", "6"))
+xgb_lr = float(os.environ.get("SPF_XGB_LR", "0.1"))
+
+
 def build_model(name):
     if name == 'ridge':
-        return Ridge(alpha = 1.0)
+        return Ridge(alpha = ridge_alpha)
     if name == 'rf':
-        return RandomForestRegressor(n_estimators = 100, random_state = 67, n_jobs = n_jobs)
-    return xgb.XGBRegressor(n_estimators = 100, max_depth = 6, learning_rate = 0.1,
-                            random_state = 67, n_jobs = n_jobs)
+        return RandomForestRegressor(
+            n_estimators = rf_estimators, min_samples_leaf = rf_min_leaf,
+            max_features = float(rf_max_features) if rf_max_features.replace('.', '', 1).isdigit()
+            else rf_max_features,
+            random_state = 67, n_jobs = n_jobs)
+    return xgb.XGBRegressor(n_estimators = xgb_estimators, max_depth = xgb_depth,
+                            learning_rate = xgb_lr, random_state = 67, n_jobs = n_jobs)
 
 
 variants = pd.read_parquet(variants_path)

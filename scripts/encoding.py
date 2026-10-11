@@ -1,3 +1,4 @@
+import os
 import numpy as np
 
 # a few manifest rows record a wild type longer than the region actually mutated, by one
@@ -83,4 +84,9 @@ def result_stem(family, split_mode, row_filter, esm_name):
         stem += f"_{row_filter}"
     if esm_name != 'ESM2-150M':
         stem += f"_{esm_models[esm_name][2]}"
+    # a run under different model settings is a different experiment and must not land
+    # on top of the one it is being compared against
+    tag = os.environ.get("SPF_TAG", "").strip()
+    if tag:
+        stem += f"_{tag}"
     return stem
