@@ -1,0 +1,23 @@
+accession,name,functional_class,binds_metal,source
+PF00105,zf-C4 nuclear receptor,zinc_finger,zinc,unverified
+PF00643,zf-B_box,zinc_finger,zinc,unverified
+PF00096,zf-C2H2,zinc_finger,zinc,unverified
+PF00642,zf-CCCH,zinc_finger,zinc,unverified
+PF00628,PHD finger,zinc_finger,zinc,unverified
+PF00641,zf-ZZ,zinc_finger,zinc,unverified
+PF00505,HMG box,nucleic_acid_binding,none,unverified
+PF02037,SAP,nucleic_acid_binding,none,unverified
+PF00046,Homeodomain,nucleic_acid_binding,none,unverified
+PF02198,SAND,nucleic_acid_binding,none,unverified
+PF00013,KH domain,nucleic_acid_binding,none,unverified
+PF00249,Myb DNA-binding,nucleic_acid_binding,none,unverified
+PF00397,WW,protein_interaction,none,unverified
+PF00018,SH3_1,protein_interaction,none,unverified
+PF00595,PDZ,protein_interaction,none,unverified
+PF00536,SAM_1,protein_interaction,none,unverified
+PF14604,SH3_9,protein_interaction,none,unverified
+PF07647,SAM_2,protein_interaction,none,unverified
+PF00627,UBA,protein_interaction,none,unverified
+PF00030,Crystallin beta/gamma,other,none,unverified
+PF00412,LIM,other,zinc,unverified
+PF13499,EF-hand pair,other,calcium,unverified
