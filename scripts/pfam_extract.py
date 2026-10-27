@@ -24,11 +24,15 @@ project_dir = os.path.dirname(script_dir)
 output_root = os.environ.get("SPF_OUTPUT", project_dir)
 extract_dir = f"{output_root}/results/extraction"
 
-manifest_path = os.environ.get("SPF_MANIFEST", "")
-if not manifest_path:
-    raise SystemExit("set SPF_MANIFEST to the annotated manifest csv")
+# the same place load_assays.py keeps its manifest, so this does not invent a second
+# convention; SPF_MANIFEST overrides it for a one-off
+data_root = os.environ.get("SPF_DATA", f"{output_root}/data")
+manifest_path = os.environ.get("SPF_MANIFEST",
+                               f"{data_root}/260930_manifest_annotated.csv")
 if not os.path.exists(manifest_path):
-    raise SystemExit(f"{manifest_path} not found")
+    raise SystemExit(f"{manifest_path} not found. Put the annotated manifest there, "
+                     f"as jobs/setup_o2.sh does for the 260822 one, or point "
+                     f"SPF_MANIFEST at it.")
 
 min_coverage = float(os.environ.get("SPF_MIN_COVERAGE", 0.50))
 min_residues = int(os.environ.get("SPF_MIN_RESIDUES", 30))
