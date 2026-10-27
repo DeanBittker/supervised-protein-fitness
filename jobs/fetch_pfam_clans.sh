@@ -14,8 +14,28 @@ set -u
 SHARED=${SPF_OUTPUT:-/n/groups/marks/projects/ProteinGym_supervised/260918_domain_clustering}
 target="$SHARED/reference/pfam_clans.tsv"
 
+# the table is five tab-separated columns with no header, the second being the clan
+# or empty. Checked on a file that is already here as well as on a fresh download: a
+# copy that arrived some other way has had no validation at all.
+check() {
+  local path=$1
+  local fields first
+  fields=$(awk -F'\t' 'NR==1{print NF; exit}' "$path")
+  first=$(head -1 "$path" | cut -f1)
+  if [ "$fields" != "5" ] || [[ ! "$first" =~ ^PF[0-9]{5}$ ]]; then
+    echo "$path is not a Pfam clans table: $fields fields, first id '$first'" >&2
+    return 1
+  fi
+  echo "$path: $(wc -l < "$path") families, \
+$(awk -F'\t' '$2 != "" && $2 != "\\N"' "$path" | wc -l) of them in a clan"
+}
+
 if [ -s "$target" ]; then
-  echo "already have $target ($(wc -l < "$target") lines)"
+  echo "already have $target"
+  check "$target" || {
+    echo "move or delete it and run this again to re-fetch" >&2
+    exit 1
+  }
   exit 0
 fi
 mkdir -p "$SHARED/reference" || { echo "cannot write to $SHARED/reference" >&2; exit 1; }
@@ -49,14 +69,6 @@ fi
 gunzip -c "$scratch/clans.gz" > "$scratch/clans.tsv" || {
   echo "the download is not gzip - a proxy probably returned an error page" >&2; exit 1; }
 
-# the table is five tab-separated columns with no header, the second being the clan or
-# empty. Check that before anything downstream trusts it.
-read -r lines fields <<< "$(awk -F'\t' 'NR==1{f=NF} END{print NR, f}' "$scratch/clans.tsv")"
-first=$(head -1 "$scratch/clans.tsv" | cut -f1)
-if [ "$fields" != "5" ] || [[ ! "$first" =~ ^PF[0-9]{5}$ ]]; then
-  echo "unexpected shape: $lines lines, $fields fields, first id '$first'" >&2
-  exit 1
-fi
+check "$scratch/clans.tsv" || exit 1
 mv "$scratch/clans.tsv" "$target"
-clanned=$(awk -F'\t' '$2 != "" && $2 != "\\N"' "$target" | wc -l)
-echo "wrote $target: $lines families, $clanned of them in a clan"
+echo "wrote $target"
