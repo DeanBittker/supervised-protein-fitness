@@ -23,3 +23,6 @@ logs/
 
 # Private project notes - not for a public repo
 claude_notes/
+
+# third-party reference tables, fetched rather than committed
+reference/pfam_clans.tsv

@@ -1,3 +1,4 @@
+import csv
 import os
 import re
 import numpy as np
@@ -37,7 +38,13 @@ min_residues = int(os.environ.get("SPF_MIN_RESIDUES", 30))
 overlap_rule = os.environ.get("SPF_OVERLAP_RULE", "fraction")
 if overlap_rule not in ('fraction', 'length'):
     raise SystemExit("SPF_OVERLAP_RULE must be 'fraction' or 'length'")
-clans_path = os.environ.get("SPF_CLANS", f"{project_dir}/reference/pfam_clans.tsv")
+# the clan table is a third-party file, not repo reference data, so it lives beside
+# the other shared inputs; the repo copy is only a fallback for laptop runs
+clans_candidates = [os.environ["SPF_CLANS"]] if os.environ.get("SPF_CLANS") else [
+    f"{output_root}/reference/pfam_clans.tsv",
+    f"{project_dir}/reference/pfam_clans.tsv",
+]
+clans_path = next((p for p in clans_candidates if os.path.exists(p)), clans_candidates[0])
 
 os.makedirs(extract_dir, exist_ok = True)
 
@@ -229,9 +236,11 @@ kept = instances[keep].copy()
 # one clan on opposite sides of a split would leak. The clan is the held-out unit where
 # one is known and the family stands in for itself where none is.
 if os.path.exists(clans_path):
+    # quoting off: the description column carries apostrophes and stray quote marks
     clans = pd.read_csv(clans_path, sep = '\t', header = None, usecols = [0, 1],
-                        names = ['pfam', 'clan'], dtype = str)
-    clans['clan'] = clans['clan'].replace('\\N', np.nan)
+                        names = ['pfam', 'clan'], dtype = str,
+                        quoting = csv.QUOTE_NONE)
+    clans['clan'] = clans['clan'].replace({'\\N': np.nan, '': np.nan})
     mapping = clans.dropna(subset = ['clan']).set_index('pfam')['clan']
     kept['clan'] = kept['pfam'].map(mapping)
     kept['group'] = kept['clan'].fillna(kept['pfam'])
@@ -243,7 +252,8 @@ else:
     kept['clan'] = np.nan
     kept['group'] = kept['pfam']
     print(f"\nno clan table at {clans_path}, so every family stands alone and related "
-          f"families can still straddle a split. Pfam-A.clans.tsv fixes this.")
+          f"families can still straddle a split. Run jobs/fetch_pfam_clans.sh on an "
+          f"O2 login node to fix it.")
 
 # --- what is left to model ----------------------------------------------------------
 usable = kept[(kept['is_primary_condition'] == True) &
