@@ -29,8 +29,10 @@ trap 'rm -rf "$scratch"' EXIT
 
 for url in "${mirrors[@]}"; do
   echo "trying $url"
+  # --max-time as well as --connect-timeout: a proxy that accepts the connection and
+  # then stalls would otherwise hang here with no output and nothing to interrupt
   if command -v curl > /dev/null; then
-    curl -fsSL --connect-timeout 20 -o "$scratch/clans.gz" "$url" && break
+    curl -fsSL --connect-timeout 20 --max-time 120 -o "$scratch/clans.gz" "$url" && break
   else
     wget -q -T 20 -O "$scratch/clans.gz" "$url" && break
   fi
