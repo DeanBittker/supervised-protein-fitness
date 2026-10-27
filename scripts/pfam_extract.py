@@ -276,8 +276,15 @@ for cut in (2, 3, 5, 10):
 print("\n  deepest ten:")
 print(groups.head(10).to_string())
 
+# every named instance with its coverage, kept or not, so the cutoff can be drawn
+# and re-argued later without reading the manifest again
+coverage_table = instances[['filename', 'paper', 'pfam', 'repeat', 'pfam_length',
+                            'covered', 'coverage']].copy()
+coverage_table['kept'] = keep
+
 dropped = pd.DataFrame(dropped)
-for frame, name in [(kept, 'instances'), (dropped, 'dropped'), (groups, 'groups')]:
+for frame, name in [(kept, 'instances'), (dropped, 'dropped'), (groups, 'groups'),
+                    (coverage_table, 'coverage')]:
     path = f"{extract_dir}/{name}.csv"
     frame.to_csv(path, index = name == 'groups')
     print(f"\nwrote {path}")
