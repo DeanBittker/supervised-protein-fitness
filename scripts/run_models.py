@@ -6,6 +6,8 @@ from scipy.stats import spearmanr
 from sklearn.preprocessing import OneHotEncoder as onehot
 from sklearn.linear_model import Ridge
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
 import xgboost as xgb
 from encoding import to_alignment_columns, esm_models, filter_rows, result_stem
 
@@ -43,7 +45,15 @@ unknown = [name for name in encodings if name != 'onehot' and name not in esm_mo
 if unknown:
     raise SystemExit(f"unknown encoding {unknown}, expected onehot or one of "
                      f"{sorted(esm_models)}")
-models = ['ridge', 'rf', 'xgb']
+# the benchmark's baseline list is ridge and gaussian processes rather than trees, so
+# gp has to be runnable; it stays out of the default set because it is far slower and
+# every existing result was produced without it
+known_models = ('ridge', 'rf', 'xgb', 'gp')
+models = [name.strip() for name in
+          os.environ.get("SPF_MODELS", "ridge,rf,xgb").split(',') if name.strip()]
+unknown_models = [name for name in models if name not in known_models]
+if unknown_models:
+    raise SystemExit(f"unknown model {unknown_models}, expected some of {list(known_models)}")
 targets = ['raw', 'zscore']
 dry_run = os.environ.get("SPF_DRYRUN", "") == "1"
 
@@ -99,11 +109,47 @@ rf_max_features = os.environ.get("SPF_RF_MAX_FEATURES", "1.0")
 xgb_estimators = int(os.environ.get("SPF_XGB_ESTIMATORS", "100"))
 xgb_depth = int(os.environ.get("SPF_XGB_DEPTH", "6"))
 xgb_lr = float(os.environ.get("SPF_XGB_LR", "0.1"))
+# an exact gaussian process is cubic in the number of training points and quadratic in
+# memory, so a deep family's full training set would need a kernel matrix tens of
+# thousands on a side. the cap keeps it tractable; it is recorded per cell because a
+# gp fitted on a subsample is a weaker claim than one fitted on everything.
+gp_max_train = int(os.environ.get("SPF_GP_MAX_TRAIN", "4000"))
+gp_restarts = int(os.environ.get("SPF_GP_RESTARTS", "0"))
+
+
+class CappedGP:
+    """A gaussian process fitted to at most gp_max_train points, sampled without
+    replacement when the training set is larger. Exposes n_fitted so the result row
+    can say how many points the fit actually saw."""
+
+    def __init__(self, cap, restarts, seed = 67):
+        self.cap, self.restarts, self.seed = cap, restarts, seed
+        self.n_fitted = 0
+        self.model = None
+
+    def fit(self, X, y):
+        if len(X) > self.cap:
+            chosen = np.random.default_rng(self.seed).choice(len(X), self.cap,
+                                                             replace = False)
+            X, y = X[chosen], y[chosen]
+        self.n_fitted = len(X)
+        kernel = (ConstantKernel(1.0) * RBF(length_scale = 1.0)
+                  + WhiteKernel(noise_level = 1.0))
+        self.model = GaussianProcessRegressor(
+            kernel = kernel, normalize_y = True, copy_X_train = False,
+            n_restarts_optimizer = self.restarts, random_state = self.seed)
+        self.model.fit(X, y)
+        return self
+
+    def predict(self, X):
+        return self.model.predict(X)
 
 
 def build_model(name):
     if name == 'ridge':
         return Ridge(alpha = ridge_alpha)
+    if name == 'gp':
+        return CappedGP(gp_max_train, gp_restarts)
     if name == 'rf':
         return RandomForestRegressor(
             n_estimators = rf_estimators, min_samples_leaf = rf_min_leaf,
@@ -289,6 +335,9 @@ for paper in papers:
                         'target': target, fold_column: fold,
                         'row_filter': row_filter,
                         'n_train': int(keep_train.sum()), 'n_test': int(keep_test.sum()),
+                        # equals n_train for every model but the capped gp
+                        'n_train_fitted': int(getattr(model, 'n_fitted',
+                                                      keep_train.sum())),
                         'n_train_domains': int(assignment[assignment['split'] == 'train'].shape[0]),
                         'n_test_domains': int(assignment[assignment['split'] == 'test'].shape[0]),
                         'train_r2': round(float(r2(Y_train[keep_train], train_pred)), 4),
