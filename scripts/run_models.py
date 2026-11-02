@@ -113,7 +113,12 @@ xgb_lr = float(os.environ.get("SPF_XGB_LR", "0.1"))
 # memory, so a deep family's full training set would need a kernel matrix tens of
 # thousands on a side. the cap keeps it tractable; it is recorded per cell because a
 # gp fitted on a subsample is a weaker claim than one fitted on everything.
-gp_max_train = int(os.environ.get("SPF_GP_MAX_TRAIN", "4000"))
+# measured on synthetic data shaped like the one-hot features, 8000 rows by 400
+# columns: a cap of 1000 fits in 6.6s and reaches 0.822 test Spearman, a cap of 3000
+# takes 220s and reaches 0.886. Thirty-three times the time for eight percent more
+# correlation, so 1000 is the default and a deeper cap is a deliberate check on one
+# family rather than the way the grid is run.
+gp_max_train = int(os.environ.get("SPF_GP_MAX_TRAIN", "1000"))
 gp_restarts = int(os.environ.get("SPF_GP_RESTARTS", "0"))
 
 
