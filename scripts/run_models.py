@@ -3,6 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
+from scipy.spatial.distance import pdist
 from sklearn.preprocessing import OneHotEncoder as onehot
 from sklearn.linear_model import Ridge
 from sklearn.ensemble import RandomForestRegressor
@@ -138,8 +139,23 @@ class CappedGP:
                                                              replace = False)
             X, y = X[chosen], y[chosen]
         self.n_fitted = len(X)
-        kernel = (ConstantKernel(1.0) * RBF(length_scale = 1.0)
-                  + WhiteKernel(noise_level = 1.0))
+        # A length scale of 1 is hopeless on sparse one-hot vectors in a thousand
+        # dimensions: typical distances between variants are far larger, every
+        # off-diagonal kernel entry underflows to zero, and the marginal likelihood
+        # then prefers the degenerate fit where the amplitude collapses, the length
+        # scale runs to its bound and the model predicts one constant for every
+        # variant. Spearman against a constant is undefined, so those folds vanished
+        # as NaN. The median pairwise distance is the standard starting point, and
+        # the bounds are tight enough that it cannot walk back to the degenerate
+        # corner.
+        probe = X if len(X) <= 500 else X[np.random.default_rng(self.seed)
+                                          .choice(len(X), 500, replace = False)]
+        distances = pdist(probe)
+        distances = distances[distances > 0]
+        scale = float(np.median(distances)) if distances.size else 1.0
+        kernel = (ConstantKernel(1.0, (1e-2, 1e3))
+                  * RBF(scale, (scale / 30, scale * 30))
+                  + WhiteKernel(0.1, (1e-5, 1e1)))
         self.model = GaussianProcessRegressor(
             kernel = kernel, normalize_y = True, copy_X_train = False,
             n_restarts_optimizer = self.restarts, random_state = self.seed)
@@ -343,6 +359,10 @@ for paper in papers:
                         # equals n_train for every model but the capped gp
                         'n_train_fitted': int(getattr(model, 'n_fitted',
                                                       keep_train.sum())),
+                        # a collapsed fit predicts one value for everything, which
+                        # makes Spearman undefined; recorded so it reads as a failed
+                        # fit rather than a missing cell
+                        'pred_range': round(float(np.ptp(test_pred)), 6),
                         'n_train_domains': int(assignment[assignment['split'] == 'train'].shape[0]),
                         'n_test_domains': int(assignment[assignment['split'] == 'test'].shape[0]),
                         'train_r2': round(float(r2(Y_train[keep_train], train_pred)), 4),
