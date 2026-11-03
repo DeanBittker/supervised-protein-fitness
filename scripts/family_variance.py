@@ -63,6 +63,15 @@ if per_family.empty:
     raise SystemExit(f"no family has {min_folds} folds or more")
 
 models = sorted(per_family['model'].unique())
+# the table order, the figure's row order and the headline all key on one model, and
+# taking models[0] made that whichever name sorted first: 'rf' before gp existed, 'gp'
+# after. Ridge is the reference the result is stated against, so name it rather than
+# letting the alphabet pick.
+reference = os.environ.get("SPF_REFERENCE_MODEL", "ridge")
+if reference not in models:
+    reference = models[0]
+    print(f"no '{os.environ.get('SPF_REFERENCE_MODEL', 'ridge')}' cells here, "
+          f"ordering on {reference} instead")
 print(f"\n{per_family['family'].nunique()} families, {paper}, {encoding}, {target}")
 across = (per_family.groupby('model')['mean']
           .agg(families = 'count', mean = 'mean', sd = 'std', min = 'min', max = 'max'))
@@ -71,12 +80,19 @@ print(across.to_string(float_format = lambda v: f"{v:+.3f}"))
 wide = per_family.pivot_table(index = 'family', columns = 'model', values = 'mean')
 wide['folds'] = per_family.groupby('family')['folds'].max()
 print()
-print(wide.sort_values(models[0], ascending = False)
+print(wide.sort_values(reference, ascending = False)
       .to_string(float_format = lambda v: f"{v:+.3f}"))
 
 slide = os.environ.get("SPF_SLIDE", "") == "1"
 scale = 1.4 if slide else 1.0
-palette = ["#0072B2", "#D55E00", "#009E73", "#CC79A7"]
+# Okabe-Ito, ordered so the first four separate under deuteranopia. Purple sits at
+# dE 7.6 against green, and with models sorted alphabetically that pair would land on
+# ridge and xgb, which is the comparison this figure exists to make. Orange in its
+# place takes the worst pair to 11.0 and clears the contrast floor as well.
+palette = ["#0072B2", "#D55E00", "#009E73", "#E69F00", "#CC79A7", "#56B4E9"]
+if len(models) > len(palette):
+    raise SystemExit(f"{len(models)} models but only {len(palette)} colours: "
+                     f"{models}. Add a colourblind-safe step rather than cycling.")
 colour = dict(zip(models, palette))
 ink, muted = "#1a1a1a", "#6b6b6b"
 plt.rcParams.update({
@@ -87,7 +103,7 @@ plt.rcParams.update({
     "legend.frameon": False, "grid.color": "#e4e4e2", "grid.linewidth": 0.8,
 })
 
-order = wide.sort_values(models[0]).index.tolist()
+order = wide.sort_values(reference).index.tolist()
 height = max(4.5, 0.34 * len(order)) * scale
 fig, ax = plt.subplots(figsize = (9 * scale, height))
 ax.grid(True, axis = 'x', zorder = 0)
@@ -111,7 +127,7 @@ ax.set_ylim(-0.8, len(order) - 0.2)
 ax.set_xlabel("Spearman $\\rho$ within the held-out protein, averaged over folds")
 ax.legend(loc = 'lower right', fontsize = 9.5 * scale)
 
-headline = across.loc[models[0]] if models[0] in across.index else None
+headline = across.loc[reference] if reference in across.index else None
 subtitle = (f"{encoding}, leave-one-cluster-out at 60% identity, "
             f"held-out domains per family in brackets")
 fig.suptitle(f"{paper}: how much of the PF00018 result is the method and how much is "
