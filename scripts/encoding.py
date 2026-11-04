@@ -84,6 +84,16 @@ def result_stem(family, split_mode, row_filter, esm_name):
         stem += f"_{row_filter}"
     if esm_name != 'ESM2-150M':
         stem += f"_{esm_models[esm_name][2]}"
+    # A training-set cap is part of the experiment, not a setting. Leaving it out of
+    # the name once cost a batch job that resumed a differently-capped run's cells and
+    # exited in twenty seconds having recomputed nothing. The defaults add nothing, so
+    # existing results keep their names.
+    cap = int(os.environ.get("SPF_MAX_TRAIN", "0"))
+    if cap > 0:
+        stem += f"_cap{cap}"
+    gp_cap = int(os.environ.get("SPF_GP_MAX_TRAIN", "1000"))
+    if gp_cap != 1000:
+        stem += f"_gpcap{gp_cap}"
     # a run under different model settings is a different experiment and must not land
     # on top of the one it is being compared against
     tag = os.environ.get("SPF_TAG", "").strip()

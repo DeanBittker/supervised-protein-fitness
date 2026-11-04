@@ -121,24 +121,46 @@ xgb_lr = float(os.environ.get("SPF_XGB_LR", "0.1"))
 # family rather than the way the grid is run.
 gp_max_train = int(os.environ.get("SPF_GP_MAX_TRAIN", "1000"))
 gp_restarts = int(os.environ.get("SPF_GP_RESTARTS", "0"))
+# A cap that applies to every model, not just the gaussian process. Comparing a gp
+# fitted on a thousand rows against a ridge fitted on twenty-nine thousand measures
+# the training budget as much as the model, so SPF_MAX_TRAIN caps them alike. Zero
+# means no cap, which is what every existing result was produced under.
+train_cap = int(os.environ.get("SPF_MAX_TRAIN", "0"))
+subsample_seed = 67
 
 
-class CappedGP:
-    """A gaussian process fitted to at most gp_max_train points, sampled without
-    replacement when the training set is larger. Exposes n_fitted so the result row
-    can say how many points the fit actually saw."""
+def effective_cap(name):
+    """How many training rows this model may see; 0 means all of them.
 
-    def __init__(self, cap, restarts, seed = 67):
-        self.cap, self.restarts, self.seed = cap, restarts, seed
-        self.n_fitted = 0
+    SPF_MAX_TRAIN overrides the gp-only cap rather than combining with it. Taking the
+    smaller of the two would mean SPF_MAX_TRAIN=3000 fitted ridge on three thousand
+    rows and the gp on its default thousand, which is exactly the unmatched
+    comparison the setting exists to avoid.
+    """
+    if train_cap > 0:
+        return train_cap
+    return gp_max_train if name == 'gp' else 0
+
+
+def subsample(X, y, cap):
+    """Take at most cap rows, without replacement and from a fixed seed, so two
+    models under the same cap are fitted to the identical rows rather than merely to
+    the same number of them."""
+    if cap <= 0 or len(X) <= cap:
+        return X, y, len(X)
+    chosen = np.random.default_rng(subsample_seed).choice(len(X), cap, replace = False)
+    return X[chosen], y[chosen], cap
+
+
+class ScaledGP:
+    """A gaussian process whose kernel starts where the data is. The training-set
+    cap lives outside, with every other model's."""
+
+    def __init__(self, restarts, seed = 67):
+        self.restarts, self.seed = restarts, seed
         self.model = None
 
     def fit(self, X, y):
-        if len(X) > self.cap:
-            chosen = np.random.default_rng(self.seed).choice(len(X), self.cap,
-                                                             replace = False)
-            X, y = X[chosen], y[chosen]
-        self.n_fitted = len(X)
         # A length scale of 1 is hopeless on sparse one-hot vectors in a thousand
         # dimensions: typical distances between variants are far larger, every
         # off-diagonal kernel entry underflows to zero, and the marginal likelihood
@@ -170,7 +192,7 @@ def build_model(name):
     if name == 'ridge':
         return Ridge(alpha = ridge_alpha)
     if name == 'gp':
-        return CappedGP(gp_max_train, gp_restarts)
+        return ScaledGP(gp_restarts)
     if name == 'rf':
         return RandomForestRegressor(
             n_estimators = rf_estimators, min_samples_leaf = rf_min_leaf,
@@ -338,7 +360,13 @@ for paper in papers:
                     keep_test = np.isfinite(Y_test)
 
                     model = build_model(model_name)
-                    model.fit(X_train[keep_train], Y_train[keep_train])
+                    fit_X, fit_Y, n_fitted = subsample(
+                        X_train[keep_train], Y_train[keep_train],
+                        effective_cap(model_name))
+                    model.fit(fit_X, fit_Y)
+                    # scored on the whole training set even when fitted on part of
+                    # it, so train and test numbers stay on the same row sets they
+                    # were on before any cap existed
                     train_pred = model.predict(X_train[keep_train])
                     test_pred = model.predict(X_test[keep_test])
 
@@ -357,8 +385,7 @@ for paper in papers:
                         'row_filter': row_filter,
                         'n_train': int(keep_train.sum()), 'n_test': int(keep_test.sum()),
                         # equals n_train for every model but the capped gp
-                        'n_train_fitted': int(getattr(model, 'n_fitted',
-                                                      keep_train.sum())),
+                        'n_train_fitted': int(n_fitted),
                         # a collapsed fit predicts one value for everything, which
                         # makes Spearman undefined; recorded so it reads as a failed
                         # fit rather than a missing cell
