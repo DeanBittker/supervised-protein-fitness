@@ -98,19 +98,23 @@ if variants.empty:
     raise SystemExit("no variants selected, nothing to embed")
 
 counts = variants.groupby('dataset').size()
-datasets = sorted(counts.index)
-pending = [d for d in datasets
+# Shard the whole list, biggest first, before looking at the cache. Sharding the
+# pending list instead meant each task strided into a list that the other tasks
+# running beside it were shortening as they wrote, so the slices did not partition
+# anything and datasets fell between them. This assignment depends only on the list
+# and the shard number, so it is the same whenever a task starts and whatever else
+# has finished.
+ordered = sorted(counts.index, key = lambda name: (-int(counts[name]), name))
+print(f"{selection}: {len(ordered)} datasets")
+if shards > 1:
+    ordered = ordered[(shard_index - 1) % shards::shards]
+    print(f"shard {shard_index} of {shards}: {len(ordered)} datasets, "
+          f"{int(counts[ordered].sum()):,} sequences assigned")
+
+pending = [d for d in ordered
            if not cache_matches(f"{embedding_dir}/{d}_{cache_tag}.npy",
                                 int(counts[d]))]
-print(f"{selection}: {len(datasets)} datasets, {len(pending)} still to embed")
-
-# biggest first, then strided, so no task is handed every large dataset
-pending.sort(key = lambda name: (-int(counts[name]), name))
-if shards > 1:
-    mine = pending[(shard_index - 1) % shards::shards]
-    print(f"shard {shard_index} of {shards}: {len(mine)} of {len(pending)} datasets, "
-          f"{int(counts[mine].sum()):,} sequences")
-    pending = mine
+print(f"{len(pending)} of this shard's {len(ordered)} still to embed")
 
 if not pending:
     print("nothing to do")
