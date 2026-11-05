@@ -93,6 +93,10 @@ def result_stem(family, split_mode, row_filter, esm_name):
     # the name once cost a batch job that resumed a differently-capped run's cells and
     # exited in twenty seconds having recomputed nothing. The defaults add nothing, so
     # existing results keep their names.
+    # centred embeddings are a different experiment from raw ones and must not land
+    # in the same file
+    if os.environ.get("SPF_CENTRE_EMBEDDINGS", "") == "1":
+        stem += "_centred"
     cap = int(os.environ.get("SPF_MAX_TRAIN", "0"))
     if cap > 0:
         stem += f"_cap{cap}"

@@ -35,6 +35,7 @@ cache_tag = esm_models[esm_name][2]
 # kermut and anything else indexed by site needs both kinds of indel gone, so the row
 # set is named here and recorded with the results rather than assumed
 row_filter = os.environ.get("SPF_ROWS", "drop_insertions")
+centre_embeddings = os.environ.get("SPF_CENTRE_EMBEDDINGS", "") == "1"
 # a clan's domains come from many papers at once, so clan mode pools them into one
 # scope instead of training each paper separately
 papers = ['all'] if os.environ.get("SPF_SPLIT_MODE", "replicate") == 'clan' \
@@ -290,6 +291,15 @@ for dataset in variants['dataset'].unique():
     if array.shape[0] != counts[dataset]:
         stale.append((dataset, array.shape[0], int(counts[dataset])))
         continue
+    if centre_embeddings:
+        # A mean-pooled embedding is dominated by which protein the variant came
+        # from; a single substitution moves it by a fraction of that. The target has
+        # already had the between-protein component removed by z-scoring within
+        # dataset, so the features are carrying a component the target does not.
+        # Subtracting each dataset's own mean cancels protein identity and leaves
+        # the substitution effect, which is what per-protein Spearman asks about.
+        # For a single-substitution library that mean is close to the wild type.
+        array = array - array.mean(axis = 0, keepdims = True)
     embeddings[dataset] = array
 missing = [d for d in variants['dataset'].unique() if d not in embeddings]
 if stale:
