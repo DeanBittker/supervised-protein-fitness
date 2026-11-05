@@ -7,7 +7,7 @@ import pandas as pd
 # GPU-sized install and the better part of a minute, and nothing above the model load
 # needs them, so a bad configuration or an already-complete shard fails or exits
 # before paying for either.
-from encoding import esm_models, filter_rows
+from encoding import esm_models, filter_rows, pooling_mode, embedding_path
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
@@ -43,14 +43,34 @@ plan_only = os.environ.get("SPF_DRYRUN", "") == "1"
 os.makedirs(embedding_dir, exist_ok = True)
 
 print(f"model {encoding_name} ({model_name}), layer {esm_layer}, batch {esm_batch_size}")
-print(f"cache tag {cache_tag}, rows {row_filter}")
+print(f"cache tag {cache_tag}, rows {row_filter}, pooling {pooling_mode()}")
 
 
 def cache_matches(path, expected_rows):
     return os.path.exists(path) and np.load(path, mmap_mode='r').shape[0] == expected_rows
 
 
-def esm_encode_batch(sequences, batch_size=esm_batch_size):
+def mutated_sites(sequences, wild_type):
+    """The residue each sequence differs from its wild type at, 0-based.
+
+    Several substitutions give their mean; a length mismatch, which a deletion
+    causes, gives None and falls back to averaging the whole sequence, since the
+    positions no longer line up. Returned as a list the same length as sequences.
+    """
+    sites, unaligned = [], 0
+    for sequence in sequences:
+        if wild_type is None or len(sequence) != len(wild_type):
+            sites.append(None)
+            unaligned += 1
+            continue
+        differing = [i for i, (a, b) in enumerate(zip(sequence, wild_type)) if a != b]
+        sites.append(differing if differing else None)
+        if not differing:
+            unaligned += 1
+    return sites, unaligned
+
+
+def esm_encode_batch(sequences, sites=None, batch_size=esm_batch_size):
     all_embeddings = []
     total_batches = (len(sequences) + batch_size - 1) // batch_size
     start_time = time.time()
@@ -68,10 +88,25 @@ def esm_encode_batch(sequences, batch_size=esm_batch_size):
         token_reps = results["representations"][esm_layer]
         for k, seq in enumerate(batch_seqs):
             seq_len = len(seq[1])
-            embedding = token_reps[k, 1:seq_len+1,:].mean(dim=0)
+            residues = token_reps[k, 1:seq_len + 1, :]
+            where = None if sites is None else sites[i + k]
+            # no usable site, so fall back to the mean rather than drop the row:
+            # the row set has to stay identical across encodings
+            embedding = (residues.mean(dim = 0) if where is None
+                         else residues[where].mean(dim = 0))
             all_embeddings.append(embedding.cpu().numpy())
     return np.stack(all_embeddings)
 
+
+pooling = pooling_mode()
+wild_types = {}
+if pooling != 'mean':
+    constructs_path = f"{output_root}/results/constructs.csv"
+    if not os.path.exists(constructs_path):
+        raise SystemExit(f"{pooling} pooling needs wild-type sequences, "
+                         f"and {constructs_path} is not there")
+    table = pd.read_csv(constructs_path)
+    wild_types = dict(zip(table['construct'], table['wt_sequence']))
 
 variants = pd.read_parquet(variants_path)
 if dataset_list:
@@ -112,7 +147,7 @@ if shards > 1:
           f"{int(counts[ordered].sum()):,} sequences assigned")
 
 pending = [d for d in ordered
-           if not cache_matches(f"{embedding_dir}/{d}_{cache_tag}.npy",
+           if not cache_matches(embedding_path(embedding_dir, d, cache_tag),
                                 int(counts[d]))]
 print(f"{len(pending)} of this shard's {len(ordered)} still to embed")
 
@@ -141,11 +176,25 @@ esm_model.eval()
 for n, dataset in enumerate(pending):
     rows = variants[variants['dataset'] == dataset]
     print(f"[{n + 1}/{len(pending)}] {dataset}: {len(rows):,} sequences", flush=True)
-    embeddings = esm_encode_batch(rows['mutated_sequence'].astype(str).tolist())
+    sequences = rows['mutated_sequence'].astype(str).tolist()
+    if pooling == 'mean':
+        embeddings = esm_encode_batch(sequences)
+    else:
+        wild_type = wild_types.get(rows['construct'].iloc[0])
+        sites, fell_back = mutated_sites(sequences, wild_type)
+        if fell_back:
+            print(f"  {fell_back:,} of {len(sequences):,} have no usable mutated "
+                  f"site and are mean-pooled instead", flush=True)
+        embeddings = esm_encode_batch(sequences, sites = sites)
+        if pooling == 'site_minus_wt' and wild_type is not None:
+            # the wild type's own vector at each of those residues, so what is left
+            # is the change the substitution made rather than where it happened
+            reference = esm_encode_batch([wild_type] * len(sequences), sites = sites)
+            embeddings = embeddings - reference
 
     # written through a temporary name so an interrupted job never leaves a
     # half-written cache that would pass the row-count check
-    path = f"{embedding_dir}/{dataset}_{cache_tag}.npy"
+    path = embedding_path(embedding_dir, dataset, cache_tag)
     np.save(path + ".tmp.npy", embeddings.astype(np.float32))
     os.replace(path + ".tmp.npy", path)
 

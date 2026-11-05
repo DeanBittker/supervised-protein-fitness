@@ -10,7 +10,8 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
 import xgboost as xgb
-from encoding import to_alignment_columns, esm_models, filter_rows, result_stem
+from encoding import (to_alignment_columns, esm_models, filter_rows, result_stem,
+                      embedding_path, pooling_mode)
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
@@ -36,6 +37,9 @@ cache_tag = esm_models[esm_name][2]
 # set is named here and recorded with the results rather than assumed
 row_filter = os.environ.get("SPF_ROWS", "drop_insertions")
 centre_embeddings = os.environ.get("SPF_CENTRE_EMBEDDINGS", "") == "1"
+# validated here rather than where it is first used, so a typo fails before the run
+# reads a parquet and a dozen split files
+pooling = pooling_mode()
 # a clan's domains come from many papers at once, so clan mode pools them into one
 # scope instead of training each paper separately
 papers = ['all'] if os.environ.get("SPF_SPLIT_MODE", "replicate") == 'clan' \
@@ -284,7 +288,7 @@ embeddings = {}
 stale = []
 counts = variants.groupby('dataset').size()
 for dataset in variants['dataset'].unique():
-    path = f"{embedding_dir}/{dataset}_{cache_tag}.npy"
+    path = embedding_path(embedding_dir, dataset, cache_tag)
     if not os.path.exists(path):
         continue
     array = np.load(path)

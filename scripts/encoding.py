@@ -72,6 +72,33 @@ def filter_rows(variants, mode):
     return variants
 
 
+pooling_modes = ('mean', 'site', 'site_minus_wt')
+
+
+def pooling_mode():
+    """How a language model's per-residue output is reduced to one vector.
+
+    'mean' averages over the length dimension, which is what every embedding so far
+    used. It discards which position changed, and position is most of the signal:
+    mean-pooled one-hot is just amino acid composition and scores 0.053 against
+    positional one-hot's 0.863 on the same split. 'site' takes the residue that was
+    mutated instead, and 'site_minus_wt' subtracts the wild type's vector at that
+    same residue.
+    """
+    mode = os.environ.get("SPF_POOLING", "mean").strip()
+    if mode not in pooling_modes:
+        raise SystemExit(f"unknown pooling {mode!r}, expected one of {list(pooling_modes)}")
+    return mode
+
+
+def embedding_path(embedding_dir, dataset, cache_tag):
+    """Where one dataset's embeddings live. A pooling other than the mean is a
+    different representation, so it gets its own file rather than overwriting."""
+    mode = pooling_mode()
+    suffix = "" if mode == 'mean' else f"_{mode}"
+    return f"{embedding_dir}/{dataset}_{cache_tag}{suffix}.npy"
+
+
 def result_stem(family, split_mode, row_filter, esm_name):
     """Name a results file after the experiment that produced it.
 
@@ -97,6 +124,8 @@ def result_stem(family, split_mode, row_filter, esm_name):
     # in the same file
     if os.environ.get("SPF_CENTRE_EMBEDDINGS", "") == "1":
         stem += "_centred"
+    if pooling_mode() != 'mean':
+        stem += f"_{pooling_mode()}"
     cap = int(os.environ.get("SPF_MAX_TRAIN", "0"))
     if cap > 0:
         stem += f"_cap{cap}"
