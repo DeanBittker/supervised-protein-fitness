@@ -35,13 +35,22 @@ cache_tag = esm_models[esm_name][2]
 # kermut and anything else indexed by site needs both kinds of indel gone, so the row
 # set is named here and recorded with the results rather than assumed
 row_filter = os.environ.get("SPF_ROWS", "drop_insertions")
-papers = ['lehner', 'rocklin']
+# a clan's domains come from many papers at once, so clan mode pools them into one
+# scope instead of training each paper separately
+papers = ['all'] if os.environ.get("SPF_SPLIT_MODE", "replicate") == 'clan' \
+    else ['lehner', 'rocklin']
 # "onehot" alone skips the language model entirely, which is what a sweep over many
 # families wants: one-hot needs only the alignment, so a family can be run without
 # embedding tens of thousands of its sequences first.
 encodings = [name.strip() for name in
              os.environ.get("SPF_ENCODINGS", f"onehot,{esm_name}").split(',')
              if name.strip()]
+if os.environ.get("SPF_SPLIT_MODE", "replicate") == 'clan' and 'onehot' in encodings:
+    raise SystemExit(
+        "one-hot projects variants onto one family's alignment columns, and a clan "
+        "spans families that share no alignment, so there is no column space to "
+        "project onto. Set SPF_ENCODINGS to a language model, or hold out families "
+        "instead of clans with SPF_SPLIT_MODE=loco.")
 unknown = [name for name in encodings if name != 'onehot' and name not in esm_models]
 if unknown:
     raise SystemExit(f"unknown encoding {unknown}, expected onehot or one of "
@@ -203,10 +212,40 @@ def build_model(name):
                             learning_rate = xgb_lr, random_state = 67, n_jobs = n_jobs)
 
 
+# A clan spans many families, so clan mode cannot select variants with pfam_acc at
+# all: it takes the datasets make_clan_folds.py named and holds out a whole clan at a
+# time. SPF_GROUP runs one clan's fold alone, which is what an array task wants.
+clan_mode = split_mode == 'clan'
+group_only = os.environ.get("SPF_GROUP", "").strip()
+scope_label = (group_only or 'all') if clan_mode else family
+extract_dir = f"{results_dir}/extraction"
+
 variants = pd.read_parquet(variants_path)
-variants = variants[variants['pfam_acc'] == family].copy()
+if clan_mode:
+    for needed in (f"{extract_dir}/fold_assignment.csv", f"{extract_dir}/folds.csv"):
+        if not os.path.exists(needed):
+            raise SystemExit(f"{needed} not found, run make_clan_folds.py first")
+    assignment_table = pd.read_csv(f"{extract_dir}/fold_assignment.csv")
+    fold_table = pd.read_csv(f"{extract_dir}/folds.csv")
+    if group_only:
+        if group_only not in set(fold_table['group']):
+            raise SystemExit(f"{group_only} is not a fold; "
+                             f"{extract_dir}/folds.csv lists {len(fold_table)} groups")
+        fold_table = fold_table[fold_table['group'] == group_only]
+    group_of = dict(zip(assignment_table['filename'], assignment_table['group']))
+    variants = variants[variants['dataset'].isin(group_of)].copy()
+    if variants.empty:
+        raise SystemExit("none of the clan folds' datasets are in variants.parquet; "
+                         "load_assays.py has not read their archives")
+else:
+    variants = variants[variants['pfam_acc'] == family].copy()
 variants = filter_rows(variants, row_filter)
 variants = variants.sort_values(['dataset']).reset_index(drop = True)
+if clan_mode:
+    # the existing machinery routes a split through construct then wild-type
+    # sequence; a clan fold is assigned by dataset, so both become the dataset and
+    # the rest of the loop is unchanged
+    variants['construct'] = variants['dataset']
 
 # the z-scored target is standardised within each dataset, so a model is never
 # rewarded for learning which domain a variant came from
@@ -214,12 +253,25 @@ grouped = variants.groupby('dataset')['DMS_score']
 variants['score_raw'] = variants['DMS_score']
 variants['score_zscore'] = (variants['DMS_score'] - grouped.transform('mean')) / grouped.transform('std')
 
-constructs = pd.read_csv(f"{results_dir}/constructs.csv")
-if split_mode == 'loco':
-    fold_column = 'fold'
+fold_column = 'fold' if split_mode in ('loco', 'clan') else 'replicate'
+if clan_mode:
+    constructs = pd.DataFrame({'construct': sorted(variants['dataset'].unique())})
+    constructs['wt_sequence'] = constructs['construct']
+    # one row per dataset per fold: held out when its group is the fold's group
+    present = set(variants['dataset'].unique())
+    rows_out = []
+    for _, fold_row in fold_table.iterrows():
+        for dataset in sorted(present):
+            rows_out.append({
+                'scope': 'all', 'threshold': threshold, 'fold': int(fold_row['fold']),
+                'label': dataset,
+                'split': 'test' if group_of[dataset] == fold_row['group'] else 'train'})
+    splits = pd.DataFrame(rows_out)
+    print(f"clan mode: {len(present):,} datasets, {len(fold_table)} folds"
+          + (f", group {group_only}" if group_only else ""))
 else:
-    fold_column = 'replicate'
-splits = pd.read_csv(f"{results_dir}/{'loco' if split_mode == 'loco' else 'splits'}_{family}.csv")
+    constructs = pd.read_csv(f"{results_dir}/constructs.csv")
+    splits = pd.read_csv(f"{results_dir}/{'loco' if split_mode == 'loco' else 'splits'}_{family}.csv")
 splits = splits[np.isclose(splits['threshold'], threshold)]
 
 # embeddings are cached one file per dataset, in the same row order as the
@@ -248,7 +300,7 @@ if stale:
 if missing:
     print(f"WARNING: {len(missing)} datasets have no usable embedding, ESM2-150M cells will be skipped")
 
-cache_path = f"{results_dir}/{result_stem(family, split_mode, row_filter, esm_name)}.csv"
+cache_path = f"{results_dir}/{result_stem(scope_label, split_mode, row_filter, esm_name)}.csv"
 done = set()
 if os.path.exists(cache_path):
     previous = pd.read_csv(cache_path)
@@ -257,7 +309,7 @@ if os.path.exists(cache_path):
 
 rows = []
 for paper in papers:
-    paper_rows = variants[variants['paper'] == paper]
+    paper_rows = variants if paper == 'all' else variants[variants['paper'] == paper]
     if paper_rows.empty:
         continue
     labels = splits[splits['scope'] == paper]
@@ -272,17 +324,23 @@ for paper in papers:
     # a split assigns whole domains, so map each domain label to its variants
     # the embedding matrix is built in this same dataset order, before any row filter
     datasets_present = sorted(paper_rows['dataset'].unique())
-    # project every variant onto its family's alignment columns once per paper
-    alignment = read_alignment(f"{results_dir}/msa/{paper}_{family}.fasta")
-    wt_of = dict(zip(constructs['construct'], constructs['wt_sequence']))
+    if clan_mode:
+        # a clan spans families that share no alignment, so there is no column space
+        # to project onto and nothing to drop for not fitting one
+        alignment = {}
+        wt_of = {dataset: dataset for dataset in datasets_present}
+    else:
+        # project every variant onto its family's alignment columns once per paper
+        alignment = read_alignment(f"{results_dir}/msa/{paper}_{family}.fasta")
+        wt_of = dict(zip(constructs['construct'], constructs['wt_sequence']))
     # a split names one representative construct per domain, but several constructs
     # can share a wild-type sequence, so route through the sequence rather than the
     # label or those variants are silently left out of every partition
     split_of_wt = {wt_of[row['label']]: row['split']
                    for _, row in labels.iterrows() if row['label'] in wt_of}
-    width = len(next(iter(alignment.values())))
+    width = len(next(iter(alignment.values()))) if alignment else 0
     blocks, placed_parts, gaps = [], [], []
-    for dataset in sorted(paper_rows['dataset'].unique()):
+    for dataset in ([] if clan_mode else sorted(paper_rows['dataset'].unique())):
         rows_here = paper_rows[paper_rows['dataset'] == dataset]
         wt = wt_of.get(rows_here['construct'].iloc[0])
         if wt is None or wt not in alignment:
@@ -296,8 +354,12 @@ for paper in papers:
         placed_parts.append(placed)
         lengths = rows_here['mutated_sequence'].astype(str).str.len().values
         gaps.extend((lengths[~placed] - len(wt)).tolist())
-    chars = np.concatenate(blocks)
-    placed = np.concatenate(placed_parts)
+    if clan_mode:
+        chars = None
+        placed = np.ones(len(paper_rows), dtype = bool)
+    else:
+        chars = np.concatenate(blocks)
+        placed = np.concatenate(placed_parts)
 
     # a variant that does not match its wild type's length cannot be projected onto
     # the alignment. those rows are dropped from every encoding, not just one-hot,
@@ -307,8 +369,12 @@ for paper in papers:
         print(f"{paper}: {int((~placed).sum()):,} variants do not match their wild-type length and are dropped")
         print(f"  length difference from wild type: {dict(offsets)}")
     paper_rows = paper_rows[placed].copy()
-    chars = chars[placed]
-    print(f"{paper}: {chars.shape[1]} alignment columns, {len(paper_rows):,} variants encoded")
+    if clan_mode:
+        print(f"{paper}: {len(paper_rows):,} variants over "
+              f"{len(datasets_present)} datasets, no alignment needed")
+    else:
+        chars = chars[placed]
+        print(f"{paper}: {chars.shape[1]} alignment columns, {len(paper_rows):,} variants encoded")
 
     if dry_run:
         usable = [d for d in paper_rows['dataset'].unique() if d in embeddings]

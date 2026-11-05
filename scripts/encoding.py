@@ -79,7 +79,12 @@ def result_stem(family, split_mode, row_filter, esm_name):
     experiment and must not be merged into the default file. The defaults carry no
     suffix so existing results keep their names.
     """
-    stem = f"loco_results_{family}" if split_mode == 'loco' else f"model_results_{family}"
+    if split_mode == 'clan':
+        stem = f"clan_results_{family}"
+    elif split_mode == 'loco':
+        stem = f"loco_results_{family}"
+    else:
+        stem = f"model_results_{family}"
     if row_filter != 'drop_insertions':
         stem += f"_{row_filter}"
     if esm_name != 'ESM2-150M':
