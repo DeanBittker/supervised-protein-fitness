@@ -78,3 +78,12 @@ for frame, name, index in [(folds, 'folds', False), (assignment, 'fold_assignmen
     path = f"{extract_dir}/{name}.csv"
     frame.to_csv(path, index = index)
     print(f"\nwrote {path}")
+
+# every dataset these folds touch, training groups included, as a plain list for
+# embed_esm.py. A clan spans families, so the embedding step cannot be selected by
+# family and needs to be told exactly which datasets to cover.
+needed = sorted(assignment['filename'].unique())
+list_path = f"{extract_dir}/fold_datasets.txt"
+with open(list_path, "w") as handle:
+    handle.write("\n".join(needed) + "\n")
+print(f"\nwrote {list_path} ({len(needed):,} datasets)")

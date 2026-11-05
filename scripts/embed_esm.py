@@ -2,9 +2,11 @@ import os
 import time
 import numpy as np
 import pandas as pd
-import torch
-import esm
 
+# torch and esm are imported only once there is something to embed. They cost a
+# GPU-sized install and the better part of a minute, and nothing above the model load
+# needs them, so a bad configuration or an already-complete shard fails or exits
+# before paying for either.
 from encoding import esm_models, filter_rows
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -24,10 +26,22 @@ model_name, esm_layer, cache_tag, default_batch = esm_models[encoding_name]
 esm_batch_size = int(os.environ.get("SPF_BATCH", str(default_batch)))
 row_filter = os.environ.get("SPF_ROWS", "drop_insertions")
 
+# a newline-delimited file of dataset names, used instead of the family filter. A
+# clan spans many families, so a clan-level run cannot be selected by SPF_FAMILY at
+# all; make_clan_folds.py writes a list of exactly the datasets its folds need.
+dataset_list = os.environ.get("SPF_DATASETS", "").strip()
+# one array task takes every nth dataset from the list, largest first, so the big
+# datasets are spread across tasks instead of landing in one
+shards = int(os.environ.get("SPF_SHARDS",
+                            os.environ.get("SLURM_ARRAY_TASK_COUNT", "1")))
+shard_index = int(os.environ.get("SPF_SHARD_INDEX",
+                                 os.environ.get("SLURM_ARRAY_TASK_ID", "1")))
+if shards < 1 or shard_index < 1:
+    raise SystemExit(f"shard {shard_index} of {shards} is not a shard")
+plan_only = os.environ.get("SPF_DRYRUN", "") == "1"
+
 os.makedirs(embedding_dir, exist_ok = True)
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
 print(f"model {encoding_name} ({model_name}), layer {esm_layer}, batch {esm_batch_size}")
 print(f"cache tag {cache_tag}, rows {row_filter}")
 
@@ -60,19 +74,60 @@ def esm_encode_batch(sequences, batch_size=esm_batch_size):
 
 
 variants = pd.read_parquet(variants_path)
-variants = variants[variants['pfam_acc'] == family].copy()
+if dataset_list:
+    if not os.path.exists(dataset_list):
+        raise SystemExit(f"no dataset list at {dataset_list}")
+    wanted = [line.strip() for line in open(dataset_list) if line.strip()]
+    if not wanted:
+        raise SystemExit(f"{dataset_list} is empty")
+    present = set(variants['dataset'].unique())
+    absent = [d for d in wanted if d not in present]
+    if absent:
+        print(f"{len(absent)} of {len(wanted)} listed datasets are not in "
+              f"{os.path.basename(variants_path)} and are skipped, first few: "
+              f"{absent[:3]}")
+    variants = variants[variants['dataset'].isin(set(wanted) & present)].copy()
+    selection = f"list {os.path.basename(dataset_list)}"
+else:
+    variants = variants[variants['pfam_acc'] == family].copy()
+    selection = f"family {family}"
 # the row set has to match whatever this embedding will be compared against, so it
 # is named rather than assumed
 variants = filter_rows(variants, row_filter)
+if variants.empty:
+    raise SystemExit("no variants selected, nothing to embed")
 
-datasets = sorted(variants['dataset'].unique())
+counts = variants.groupby('dataset').size()
+datasets = sorted(counts.index)
 pending = [d for d in datasets
            if not cache_matches(f"{embedding_dir}/{d}_{cache_tag}.npy",
-                                int((variants['dataset'] == d).sum()))]
-print(f"family {family}: {len(datasets)} datasets, {len(pending)} still to embed")
+                                int(counts[d]))]
+print(f"{selection}: {len(datasets)} datasets, {len(pending)} still to embed")
+
+# biggest first, then strided, so no task is handed every large dataset
+pending.sort(key = lambda name: (-int(counts[name]), name))
+if shards > 1:
+    mine = pending[(shard_index - 1) % shards::shards]
+    print(f"shard {shard_index} of {shards}: {len(mine)} of {len(pending)} datasets, "
+          f"{int(counts[mine].sum()):,} sequences")
+    pending = mine
+
 if not pending:
     print("nothing to do")
     raise SystemExit(0)
+if plan_only:
+    print(f"\ndry run, would embed {len(pending)} datasets "
+          f"({int(counts[pending].sum()):,} sequences):")
+    for name in pending[:10]:
+        print(f"  {name}: {int(counts[name]):,}")
+    if len(pending) > 10:
+        print(f"  ... and {len(pending) - 10} more")
+    raise SystemExit(0)
+
+import torch
+import esm
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
 esm_model, alphabet = getattr(esm.pretrained, model_name)()
 batch_converter = alphabet.get_batch_converter()
