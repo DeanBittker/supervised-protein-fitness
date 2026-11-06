@@ -502,6 +502,14 @@ if dry_run:
     raise SystemExit(0)
 
 print()
+if not os.path.exists(cache_path):
+    raise SystemExit(
+        f"no cells were computed, so nothing was written to {cache_path}.\n"
+        f"  The usual cause is an encoding being skipped: a language model needs an "
+        f"embedding for every dataset of the paper, and one missing dataset skips "
+        f"the whole encoding. Look above for 'embeddings incomplete'.\n"
+        f"  Check what is missing with:\n"
+        f"    SPF_DRYRUN=1 python scripts/embed_esm.py")
 print(f"Results saved to {cache_path}")
 final = pd.read_csv(cache_path)
 print(f"{len(final)} cells complete")
