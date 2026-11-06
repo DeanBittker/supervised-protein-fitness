@@ -83,24 +83,37 @@ def esm_encode_batch(sequences, sites=None, batch_size=esm_batch_size):
         batch_seqs = [(str(j), s) for j, s in enumerate(sequences[i:i+batch_size])]
         _, _, batch_tokens = batch_converter(batch_seqs)
         batch_tokens = batch_tokens.to(device)
+        want_attention = sites == 'attention'
         with torch.no_grad():
-            results = esm_model(batch_tokens, repr_layers = [esm_layer])
+            results = esm_model(batch_tokens, repr_layers = [esm_layer],
+                                need_head_weights = want_attention)
         token_reps = results["representations"][esm_layer]
+        # (batch, layers, heads, query, key); how much attention each residue
+        # receives, averaged over layers, heads and queries
+        attention = results["attentions"] if want_attention else None
         for k, seq in enumerate(batch_seqs):
             seq_len = len(seq[1])
             residues = token_reps[k, 1:seq_len + 1, :]
-            where = None if sites is None else sites[i + k]
-            # no usable site, so fall back to the mean rather than drop the row:
-            # the row set has to stay identical across encodings
-            embedding = (residues.mean(dim = 0) if where is None
-                         else residues[where].mean(dim = 0))
+            if want_attention:
+                # drop the start and end tokens from both axes, then average over
+                # layers, heads and queries to get one weight per residue
+                received = attention[k, :, :, 1:seq_len + 1, 1:seq_len + 1]
+                weights = received.mean(dim = (0, 1, 2))
+                weights = weights / weights.sum().clamp(min = 1e-9)
+                embedding = (residues * weights.unsqueeze(1)).sum(dim = 0)
+            else:
+                where = None if sites is None else sites[i + k]
+                # no usable site, so fall back to the mean rather than drop the row:
+                # the row set has to stay identical across encodings
+                embedding = (residues.mean(dim = 0) if where is None
+                             else residues[where].mean(dim = 0))
             all_embeddings.append(embedding.cpu().numpy())
     return np.stack(all_embeddings)
 
 
 pooling = pooling_mode()
 wild_types = {}
-if pooling != 'mean':
+if pooling in ('site', 'site_minus_wt'):
     constructs_path = f"{output_root}/results/constructs.csv"
     if not os.path.exists(constructs_path):
         raise SystemExit(f"{pooling} pooling needs wild-type sequences, "
@@ -179,6 +192,8 @@ for n, dataset in enumerate(pending):
     sequences = rows['mutated_sequence'].astype(str).tolist()
     if pooling == 'mean':
         embeddings = esm_encode_batch(sequences)
+    elif pooling == 'attention':
+        embeddings = esm_encode_batch(sequences, sites = 'attention')
     else:
         wild_type = wild_types.get(rows['construct'].iloc[0])
         sites, fell_back = mutated_sites(sequences, wild_type)

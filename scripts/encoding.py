@@ -72,7 +72,7 @@ def filter_rows(variants, mode):
     return variants
 
 
-pooling_modes = ('mean', 'site', 'site_minus_wt')
+pooling_modes = ('mean', 'site', 'site_minus_wt', 'attention')
 
 
 def pooling_mode():
@@ -83,7 +83,9 @@ def pooling_mode():
     mean-pooled one-hot is just amino acid composition and scores 0.053 against
     positional one-hot's 0.863 on the same split. 'site' takes the residue that was
     mutated instead, and 'site_minus_wt' subtracts the wild type's vector at that
-    same residue.
+    same residue. 'attention' is a weighted average over the length instead of a flat
+    one, weighting each residue by how much attention the model itself pays it, which
+    is a fixed weighting per sequence rather than one that depends on the mutation.
     """
     mode = os.environ.get("SPF_POOLING", "mean").strip()
     if mode not in pooling_modes:
